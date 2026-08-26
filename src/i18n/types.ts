@@ -29,6 +29,7 @@ export type Strings = {
     next: string;
     prev: string;
     back: string;
+    unreviewed: string;
   };
 
   onboard: {
@@ -100,6 +101,8 @@ export type Strings = {
     takeUnusable: string;
     save: string;
     exportPack: string;
+    importDataset: string;
+    importedSummary: (signs: number, exemplars: number) => string;
     importPack: string;
     saved: string;
     signerNameLabel: string;

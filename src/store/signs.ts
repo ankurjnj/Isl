@@ -66,3 +66,18 @@ export async function putSign(sign: Sign): Promise<void> {
 export async function putExemplar(ex: Exemplar): Promise<void> {
   await db.exemplars.put(ex);
 }
+
+/** Persist signs + exemplars produced by the dataset importer. */
+export async function saveImportedSigns(
+  imported: { sign: Sign; exemplars: Exemplar[] }[],
+): Promise<{ signs: number; exemplars: number }> {
+  let exemplars = 0;
+  for (const { sign, exemplars: exs } of imported) {
+    await db.signs.put(sign);
+    for (const ex of exs) {
+      await db.exemplars.put(ex);
+      exemplars++;
+    }
+  }
+  return { signs: imported.length, exemplars };
+}

@@ -23,6 +23,8 @@ export const en: Strings = {
     next: "Next",
     prev: "Back",
     back: "Home",
+    unreviewed:
+      "From a sign-language research corpus, not yet checked by a Deaf signer. Treat it as a guide, not the final word.",
   },
 
   onboard: {
@@ -98,6 +100,8 @@ export const en: Strings = {
     takeUnusable: "Couldn’t see the hands well enough to keep this take.",
     save: "Save",
     exportPack: "Export pack",
+    importDataset: "Import dataset keypoints",
+    importedSummary: (s, e) => `Imported ${s} signs, ${e} takes. Marked unreviewed until a Deaf signer confirms them.`,
     importPack: "Import pack",
     saved: "Saved",
     signerNameLabel: "Signer name (credited on the card)",

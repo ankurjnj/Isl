@@ -37,6 +37,30 @@ export type Sign = {
 
   signer: { name: string; credit: string };
   unit: string;
+  /** Absent for Studio-recorded signs, which are Deaf-recorded by definition. */
+  provenance?: Provenance;
+};
+
+/**
+ * Where a sign form came from. Part 5.2 allows exactly two origins: a Deaf ISL
+ * signer recording in Studio, or the ISLRTC / indiansignlanguage.org
+ * dictionaries verified by a Deaf signer. Published ISL research corpora
+ * (signed by Deaf adults) are the same second category. Nothing else is a
+ * legitimate origin, and nothing is ever synthesised.
+ */
+export type Provenance = {
+  /** "studio" | dataset or dictionary name, e.g. "INCLUDE" / "ISLRTC". */
+  origin: string;
+  /** Where it came from, for the credit line and for checking later. */
+  url?: string;
+  /** Licence / terms the source was published under. */
+  license?: string;
+  /**
+   * Has a Deaf signer confirmed this form is right? Imported data starts
+   * "unreviewed" and the UI says so — an unreviewed form is never presented as
+   * settled ISL.
+   */
+  review: "unreviewed" | "deaf_reviewed";
 };
 
 /** A recorded reference take, resampled to ATTEMPT_FRAMES (Part 6.4 / v0.3). */
@@ -46,6 +70,8 @@ export type Exemplar = {
   frames: NormFrame[];
   quality: TrackingQuality;
   signerId: string;
+  /** Absent on takes recorded in Studio before provenance existed. */
+  provenance?: Provenance;
   consent: {
     granted: true;
     scope: "prototype" | "training";

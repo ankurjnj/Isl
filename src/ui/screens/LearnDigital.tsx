@@ -3,7 +3,7 @@ import { useAppStore } from "@/ui/store/appStore";
 import { useStrings } from "@/ui/hooks/useStrings";
 import { useHomeData } from "@/ui/hooks/useHomeData";
 import { Button } from "@/ui/components/Button";
-import { SkeletonPlayer } from "@/ui/components/SkeletonPlayer";
+import { DigitalHand } from "@/ui/components/DigitalHand";
 import { usableExemplarsFor } from "@/store/signs";
 import type { Exemplar } from "@/content/schema";
 import "./screens.css";
@@ -46,7 +46,7 @@ export function LearnDigital() {
       <div className="lamp">
         <div className="lamp__sign">{sign ? sign.hindi : "…"}</div>
         <div className="camera-frame reference-skeleton" style={{ maxWidth: 360 }}>
-          <SkeletonPlayer frames={exemplars[0]?.frames ?? []} slowMo={slowMo} />
+          <DigitalHand frames={exemplars[0]?.frames ?? []} slowMo={slowMo} />
         </div>
         {sign && (
           <>
@@ -56,6 +56,10 @@ export function LearnDigital() {
             <div className="sign-card__credit">
               {sign.signer.name} · {sign.region}
             </div>
+            {/* An unreviewed form is never presented as settled ISL. */}
+            {sign.provenance?.review === "unreviewed" && (
+              <p className="provenance-note">{t.mode.unreviewed}</p>
+            )}
           </>
         )}
         <Button

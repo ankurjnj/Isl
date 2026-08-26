@@ -7,7 +7,8 @@ import { CameraView } from "@/ui/components/CameraView";
 import { VOCABULARY } from "@/content/vocabulary";
 import type { Handedness, Attempt } from "@/landmarks/types";
 import type { Sign, Exemplar } from "@/content/schema";
-import { putSign, putExemplar } from "@/store/signs";
+import { putSign, putExemplar, saveImportedSigns } from "@/store/signs";
+import { importKeypointFile, type KeypointFile } from "@/content/datasetImport";
 import { exportPack, importPack, type ExemplarPack } from "@/store/pack";
 import "./screens.css";
 
@@ -33,6 +34,8 @@ export function Studio() {
   const [takes, setTakes] = useState<KeptTake[]>([]);
   const [saved, setSaved] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const datasetInput = useRef<HTMLInputElement>(null);
+  const [importNote, setImportNote] = useState<string | null>(null);
 
   const canKeep = rec.preview?.quality.usable === true;
   const canSave = takes.length > 0 && consentGranted && signerName.trim().length > 0;
@@ -90,6 +93,22 @@ export function Studio() {
     a.download = "aangan-exemplars.json";
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Import MediaPipe keypoints from a published ISL corpus (INCLUDE / OpenHands
+   * / iSign) — the route to real sign forms when nobody can record in person.
+   * See CONTENT_SOURCES.md for sources and the format.
+   */
+  async function doImportDataset(file: File) {
+    const parsed = JSON.parse(await file.text()) as KeypointFile;
+    const { signs: imported, droppedTakes } = importKeypointFile(parsed);
+    const saved = await saveImportedSigns(imported);
+    setImportNote(
+      t.studio.importedSummary(saved.signs, saved.exemplars) +
+        (droppedTakes > 0 ? ` (${droppedTakes} unusable takes skipped)` : ""),
+    );
+    setSaved(true);
   }
 
   async function doImport(file: File) {
@@ -196,6 +215,19 @@ export function Studio() {
 
         {saved && <p className="privacy-note">{t.studio.saved}</p>}
 
+        {importNote && <p className="privacy-note">{importNote}</p>}
+
+        <input
+          ref={datasetInput}
+          type="file"
+          accept="application/json"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void doImportDataset(f);
+          }}
+        />
+
         <input
           ref={fileInput}
           type="file"
@@ -225,6 +257,9 @@ export function Studio() {
           </Button>
           <Button variant="quiet" onClick={() => fileInput.current?.click()}>
             {t.studio.importPack}
+          </Button>
+          <Button variant="quiet" onClick={() => datasetInput.current?.click()}>
+            {t.studio.importDataset}
           </Button>
         </div>
       </div>

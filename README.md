@@ -64,6 +64,18 @@ npm run lint       # includes the no-audio + pure-boundary guardrails
 npm run build
 ```
 
+## Getting real sign content
+
+The app ships with an empty vocabulary and never invents a sign form. To fill
+it without recording in person, **[CONTENT_SOURCES.md](CONTENT_SOURCES.md)**
+lists the real ISL sources — the ISLRTC official dictionary, the FDMSE
+regional-variant dictionary, and open research corpora (OpenHands / INCLUDE /
+iSign) that publish MediaPipe keypoints from Deaf adult signers.
+
+Those corpora are already in this app's representation, so **Studio → "Import
+dataset keypoints"** loads them straight in. Everything imported is marked
+*unreviewed* — and labelled as such in Learn — until a Deaf signer confirms it.
+
 ## Deploy (Vercel)
 
 The app is a static SPA — `vite build` emits `dist/`, which Vercel serves
