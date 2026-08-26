@@ -1,0 +1,74 @@
+/*
+ * Aangan design tokens — Part 3 of the spec, verbatim.
+ *
+ * Direction: a parent's hands, in a dim room, lit by a phone. The app sits in
+ * deep indigo (neel); the practice screen becomes a warm lamp (haldi light).
+ * Red appears NOWHERE (Part 3, Part 7 §3): it reads as medical alarm and as
+ * failure, and this user has had enough of both.
+ */
+
+:root {
+  /* surfaces */
+  --night: #1b1f3b; /* app background */
+  --night-raised: #262b4d; /* cards, sheets */
+  --night-line: #363c66; /* dividers, borders */
+
+  /* the lamp — practice mode only, never decorative */
+  --lamp: #fff4e2;
+  --lamp-dim: #f2e3cb;
+
+  /* accent */
+  --haldi: #e9a23b; /* primary actions, focus */
+  --haldi-press: #c9862a;
+
+  /* feedback — note the absence of red */
+  --sage: #8fbf9f; /* got it */
+  --dusk: #7c8ac7; /* not yet — never red, never a failure colour */
+
+  /* text on night */
+  --ink: #fff4e2;
+  --ink-soft: #a8aecd;
+  --ink-faint: #6e7499;
+
+  /* typography */
+  --font-display: "Tiro Devanagari Hindi", Georgia, serif;
+  --font-body: "Mukta", "Noto Sans", system-ui, sans-serif;
+
+  /* type scale — larger than typical throughout, because grandparents use
+     this too (Part 3, Typography). */
+  --t-sign: 40px;
+  --t-sign-lh: 46px;
+  --t-title: 26px;
+  --t-title-lh: 32px;
+  --t-lead: 20px;
+  --t-lead-lh: 30px;
+  --t-body: 17px;
+  --t-body-lh: 26px;
+  --t-label: 15px;
+  --t-label-lh: 20px;
+  --t-fine: 14px;
+  --t-fine-lh: 20px;
+
+  /* space, shape, targets */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  --r-card: 20px;
+  --r-button: 14px;
+  --r-pill: 999px;
+
+  --tap-min: 56px; /* not 44 — one-handed, at night, possibly a grandparent */
+  --gutter: 20px;
+
+  /* motion */
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --fast: 140ms;
+  --base: 220ms;
+  --slow: 380ms;
+}

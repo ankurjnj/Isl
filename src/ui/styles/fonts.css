@@ -1,0 +1,48 @@
+/*
+ * Self-hosted, subset Devanagari + Latin fonts (Part 3, Typography).
+ * Budget: under 180KB total, verified in slice v0.7.
+ *
+ * Two families with real Devanagari design intent — not Latin faces with
+ * Devanagari bolted on. Hindi is a first-class UI language here.
+ *
+ *   Tiro Devanagari Hindi — display only. Sign names, and nothing else.
+ *   Mukta (Ek Type)       — everything else.
+ *
+ * The .woff2 files are NOT committed: they must be produced by subsetting the
+ * upstream OFL fonts to Latin + Devanagari (see src/ui/styles/fonts/README.md)
+ * and dropped in ./fonts/. Until then the fallback stacks in tokens.css
+ * (Georgia / system-ui) render the app correctly — no layout depends on the
+ * webfonts being present.
+ */
+
+@font-face {
+  font-family: "Tiro Devanagari Hindi";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/tiro-devanagari-hindi-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Mukta";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/mukta-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Mukta";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/mukta-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Mukta";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./fonts/mukta-600.woff2") format("woff2");
+}
