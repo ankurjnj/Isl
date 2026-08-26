@@ -6,6 +6,7 @@ import { useRecorder } from "@/ui/hooks/useRecorder";
 import { Button } from "@/ui/components/Button";
 import { CameraView } from "@/ui/components/CameraView";
 import { Reference } from "@/ui/components/Reference";
+import { useLamp } from "@/vision/useLamp";
 import { scoreComponents } from "@/score/components";
 import { decideFeedback, type Feedback } from "@/score/feedback";
 import type { Component } from "@/score/types";
@@ -32,6 +33,9 @@ export function Learn({ signId }: { signId: string }) {
   const [angle2, setAngle2] = useState(false);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const rec = useRecorder();
+
+  const lampOn = phase === "along" || phase === "onyourown";
+  useLamp(lampOn); // keep the screen bright while the lamp is up
 
   const grade = useCallback(
     async (): Promise<void> => {
@@ -112,7 +116,6 @@ export function Learn({ signId }: { signId: string }) {
   }
 
   const name = sign.hindi; // sign name shown in Devanagari display face
-  const lampOn = phase === "along" || phase === "onyourown";
 
   return (
     <div className="screen">

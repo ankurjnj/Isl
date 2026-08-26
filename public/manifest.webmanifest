@@ -1,0 +1,12 @@
+{
+  "name": "Aangan",
+  "short_name": "Aangan",
+  "description": "Learn to sign with your child. Your video never leaves this phone.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1B1F3B",
+  "theme_color": "#1B1F3B",
+  "lang": "hi",
+  "categories": ["education", "accessibility"]
+}

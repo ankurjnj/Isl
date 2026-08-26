@@ -12,3 +12,13 @@ createRoot(rootEl).render(
     <App />
   </StrictMode>,
 );
+
+// Offline after first load (Part 6 v1.0). Production only — a stale SW in dev
+// only gets in the way.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      /* offline support just won't be available; the app still runs */
+    });
+  });
+}

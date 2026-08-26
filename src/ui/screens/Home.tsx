@@ -87,9 +87,16 @@ export function Home() {
         ) : (
           <Button onClick={() => go({ name: "studio" })}>{t.studio.title}</Button>
         )}
-        <Button variant="quiet" onClick={() => go({ name: "studio" })}>
-          {t.studio.title}
-        </Button>
+        <div style={{ display: "flex", gap: "var(--s-3)" }}>
+          {next && (
+            <Button variant="quiet" onClick={() => go({ name: "child" })}>
+              {t.child.title}
+            </Button>
+          )}
+          <Button variant="quiet" onClick={() => go({ name: "studio" })}>
+            {t.studio.title}
+          </Button>
+        </div>
       </div>
     </div>
   );
