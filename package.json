@@ -4,6 +4,9 @@
   "version": "0.7.0",
   "type": "module",
   "description": "An Indian Sign Language app for hearing parents of deaf children under five.",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

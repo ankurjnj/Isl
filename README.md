@@ -54,6 +54,27 @@ npm run lint       # includes the no-audio + pure-boundary guardrails
 npm run build
 ```
 
+## Deploy (Vercel)
+
+The app is a static SPA — `vite build` emits `dist/`, which Vercel serves
+directly. `vercel.json` is committed and sets it up:
+
+- **Framework** Vite, **build** `npm run build`, **output** `dist`.
+- A catch-all rewrite to `/index.html` (static files still win, so `/assets`,
+  `/sw.js`, `/manifest.webmanifest`, and `/mediapipe/*` serve normally).
+- `Permissions-Policy: camera=(self)` so the camera works (Vercel is HTTPS,
+  which `getUserMedia` requires), plus the service-worker scope header and
+  long-lived caching for hashed assets.
+
+Deploy: import the repo at vercel.com (zero config needed — it reads
+`vercel.json`), or `npm i -g vercel && vercel`. It builds and deploys as-is.
+
+> The deployed app runs immediately, opening to onboarding → Home's empty state
+> → Studio. The **camera / recognition features need the MediaPipe wasm +
+> models** in `public/mediapipe/` (see that folder's README) — commit those (or
+> add them in a build step) for a camera-working demo. They're intentionally
+> not in git.
+
 ## Build order
 
 The spec builds in slices, each ending in a running app (Part 6). See
