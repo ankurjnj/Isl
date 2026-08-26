@@ -47,6 +47,18 @@ export async function referencesForUnit(unit: string): Promise<SignReference[]> 
   return refs;
 }
 
+/** References for every practiceable sign — used by Test & Converse, which
+ *  isn't scoped to a single unit. */
+export async function allReferences(): Promise<SignReference[]> {
+  const signs = await allSigns();
+  const refs: SignReference[] = [];
+  for (const sign of signs) {
+    const exemplars = await usableExemplarsFor(sign.id);
+    if (exemplars.length > 0) refs.push({ sign, exemplars });
+  }
+  return refs;
+}
+
 export async function putSign(sign: Sign): Promise<void> {
   await db.signs.put(sign);
 }

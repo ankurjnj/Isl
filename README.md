@@ -10,6 +10,16 @@ This is a proof of concept built from `SPEC.pdf`. It teaches a parent to sign
 the words they need **tonight** — milk, hurt, I love you — beside a sleeping
 child, in five-minute fragments, one-handed, in a dim room.
 
+The whole app is **two choices**, Duolingo-style:
+
+- **Learn** — watch the digital hand play the sign back. No camera.
+- **Test & Converse** — turn on the camera. *Converse* just lights up the hands
+  as they move (nothing graded); *Test* checks one sign and gives a single,
+  honest result.
+
+Recording new signs lives behind one quiet **Add signs** link (Studio), for the
+Deaf signer who owns the content.
+
 ## What makes it different
 
 - **Silent by design.** Zero audio anywhere. The child is deaf; the parent
@@ -69,11 +79,11 @@ directly. `vercel.json` is committed and sets it up:
 Deploy: import the repo at vercel.com (zero config needed — it reads
 `vercel.json`), or `npm i -g vercel && vercel`. It builds and deploys as-is.
 
-> The deployed app runs immediately, opening to onboarding → Home's empty state
-> → Studio. The **camera / recognition features need the MediaPipe wasm +
-> models** in `public/mediapipe/` (see that folder's README) — commit those (or
-> add them in a build step) for a camera-working demo. They're intentionally
-> not in git.
+> The MediaPipe wasm + models are committed under `public/mediapipe/`, so the
+> camera / hand-tracking works out of the box on the deploy (no extra step). The
+> app opens to the two-choice menu; **Converse** works immediately with the
+> camera, while **Learn** and **Test** show content once signs have been
+> recorded in **Add signs** (Studio).
 
 ## Build order
 

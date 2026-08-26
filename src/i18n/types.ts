@@ -10,6 +10,27 @@ export type Lang = "en" | "hi";
 export type Strings = {
   langName: string; // this language's own name, for the toggle
 
+  menu: {
+    learnTitle: string;
+    learnSubtitle: string;
+    testTitle: string;
+    testSubtitle: string;
+    addSigns: string;
+    learnCount: (n: number) => string;
+  };
+
+  mode: {
+    watchHand: string;
+    tryIt: string;
+    converse: string;
+    test: string;
+    pickSign: string;
+    converseHint: string;
+    next: string;
+    prev: string;
+    back: string;
+  };
+
   onboard: {
     s1Title: string;
     s1Body: string;

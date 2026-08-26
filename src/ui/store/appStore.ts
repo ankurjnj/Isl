@@ -7,9 +7,9 @@ export type Handedness = "left" | "right";
 
 export type Route =
   | { name: "onboard" }
-  | { name: "home" }
-  | { name: "learn"; signId: string }
-  | { name: "child" }
+  | { name: "menu" }
+  | { name: "learn" }
+  | { name: "test" }
   | { name: "studio" };
 
 type Persisted = {
@@ -59,7 +59,7 @@ export const useAppStore = create<AppState>((set, get) => {
   const persisted = loadPersisted();
   return {
     ...persisted,
-    route: persisted.onboardComplete ? { name: "home" } : { name: "onboard" },
+    route: persisted.onboardComplete ? { name: "menu" } : { name: "onboard" },
 
     setLang: (lang) => {
       set({ lang });
@@ -75,7 +75,7 @@ export const useAppStore = create<AppState>((set, get) => {
       save({ ...pick(get()), handedness });
     },
     completeOnboarding: () => {
-      set({ onboardComplete: true, route: { name: "home" } });
+      set({ onboardComplete: true, route: { name: "menu" } });
       save({ ...pick(get()), onboardComplete: true });
     },
     go: (route) => set({ route }),

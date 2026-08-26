@@ -4,6 +4,27 @@ import type { Strings } from "./types";
 export const en: Strings = {
   langName: "English",
 
+  menu: {
+    learnTitle: "Learn",
+    learnSubtitle: "Watch the hand. No camera needed.",
+    testTitle: "Test & Converse",
+    testSubtitle: "Turn on the camera and sign along.",
+    addSigns: "Add signs",
+    learnCount: (n) => (n === 1 ? "1 sign ready" : `${n} signs ready`),
+  },
+
+  mode: {
+    watchHand: "Watch the hand",
+    tryIt: "Now you try",
+    converse: "Converse",
+    test: "Test",
+    pickSign: "Sign to practise",
+    converseHint: "Sign together. The hands light up as they move. Nothing is graded.",
+    next: "Next",
+    prev: "Back",
+    back: "Home",
+  },
+
   onboard: {
     s1Title: "Learn to sign with your child",
     s1Body:

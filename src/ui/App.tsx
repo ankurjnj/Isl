@@ -1,8 +1,8 @@
 import { useAppStore } from "@/ui/store/appStore";
 import { Onboarding } from "@/ui/screens/Onboarding";
-import { Home } from "@/ui/screens/Home";
-import { Learn } from "@/ui/screens/Learn";
-import { ChildMode } from "@/ui/screens/ChildMode";
+import { Menu } from "@/ui/screens/Menu";
+import { LearnDigital } from "@/ui/screens/LearnDigital";
+import { TestConverse } from "@/ui/screens/TestConverse";
 import { Studio } from "@/ui/screens/Studio";
 
 export function App() {
@@ -11,9 +11,9 @@ export function App() {
   return (
     <div className="app-shell">
       {route.name === "onboard" && <Onboarding />}
-      {route.name === "home" && <Home />}
-      {route.name === "learn" && <Learn signId={route.signId} />}
-      {route.name === "child" && <ChildMode />}
+      {route.name === "menu" && <Menu />}
+      {route.name === "learn" && <LearnDigital />}
+      {route.name === "test" && <TestConverse />}
       {route.name === "studio" && <Studio />}
     </div>
   );

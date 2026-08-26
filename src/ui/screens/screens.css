@@ -71,6 +71,127 @@
   color: var(--haldi);
 }
 
+/* ── Menu (two big Duolingo-style choices) ──────────────────────────────── */
+.menu {
+  justify-content: space-between;
+}
+.menu__cards {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--s-5);
+  padding: 0 var(--gutter);
+}
+.big-card {
+  display: flex;
+  align-items: center;
+  gap: var(--s-5);
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: var(--r-card);
+  padding: var(--s-6) var(--s-5);
+  color: var(--night);
+  box-shadow: 0 8px 0 rgba(0, 0, 0, 0.18); /* the Duolingo "chunky button" shelf */
+  transition: transform var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+}
+.big-card:active {
+  transform: translateY(6px);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.18);
+}
+.big-card--learn {
+  background: var(--haldi);
+}
+.big-card--test {
+  background: var(--sage);
+}
+.big-card__icon {
+  font-size: 44px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+.big-card__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+.big-card__title {
+  font-family: var(--font-display);
+  font-size: 30px;
+  line-height: 34px;
+}
+.big-card__sub {
+  font-size: var(--t-body);
+  line-height: var(--t-body-lh);
+  opacity: 0.82;
+}
+.big-card__badge {
+  margin-top: var(--s-2);
+  align-self: flex-start;
+  font-size: var(--t-fine);
+  font-weight: 600;
+  background: rgba(27, 31, 59, 0.16);
+  border-radius: var(--r-pill);
+  padding: 2px var(--s-3);
+}
+.menu__foot {
+  padding: var(--s-4) var(--gutter) var(--s-5);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--s-2);
+}
+.text-link {
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  font-size: var(--t-label);
+  font-weight: 500;
+  padding: var(--s-3);
+}
+
+/* Segmented Converse / Test toggle. */
+.seg-toggle {
+  display: inline-flex;
+  background: rgba(27, 31, 59, 0.12);
+  border-radius: var(--r-pill);
+  padding: 3px;
+  margin-bottom: var(--s-4);
+}
+.seg-toggle button {
+  border: none;
+  background: transparent;
+  color: var(--night);
+  font-size: var(--t-label);
+  font-weight: 600;
+  min-height: 40px;
+  padding: 0 var(--s-5);
+  border-radius: var(--r-pill);
+}
+.seg-toggle button[aria-pressed="true"] {
+  background: var(--lamp);
+}
+.seg-toggle button:disabled {
+  opacity: 0.4;
+}
+
+/* Prev / count / next pager. */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.pager__count {
+  font-size: var(--t-label);
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+.learn-slowmo {
+  margin-top: var(--s-4);
+}
+
 /* ── Home ───────────────────────────────────────────────────────────────── */
 .sign-card__name {
   font-family: var(--font-display);

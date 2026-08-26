@@ -9,6 +9,27 @@ import type { Strings } from "./types";
 export const hi: Strings = {
   langName: "हिंदी",
 
+  menu: {
+    learnTitle: "सीखें",
+    learnSubtitle: "हाथ को देखें। कैमरे की ज़रूरत नहीं।",
+    testTitle: "परखें और बात करें",
+    testSubtitle: "कैमरा चालू करें और साथ में इशारा करें।",
+    addSigns: "इशारे जोड़ें",
+    learnCount: (n) => (n === 1 ? "१ इशारा तैयार" : `${n} इशारे तैयार`),
+  },
+
+  mode: {
+    watchHand: "हाथ को देखें",
+    tryIt: "अब आप करें",
+    converse: "बात करें",
+    test: "परखें",
+    pickSign: "अभ्यास का इशारा",
+    converseHint: "साथ में इशारा करें। हाथ हिलने पर जगमगाते हैं। कुछ भी आँका नहीं जाता।",
+    next: "आगे",
+    prev: "पीछे",
+    back: "घर",
+  },
+
   onboard: {
     s1Title: "अपने बच्चे के साथ इशारे सीखें",
     s1Body:

@@ -105,7 +105,7 @@ export function Studio() {
         <h1 style={{ fontFamily: "var(--font-body)", fontSize: "var(--t-title)" }}>
           {t.studio.title}
         </h1>
-        <Button variant="quiet" onClick={() => go({ name: "home" })}>
+        <Button variant="quiet" onClick={() => go({ name: "menu" })}>
           ←
         </Button>
       </div>
