@@ -24,6 +24,13 @@ export const SEG_SETTLE_MS = 400;
 export const SEG_COMMIT_MS = 200;
 /** Hard cap on a single sign (ms). */
 export const SEG_MAX_MS = 4000;
+/**
+ * Auto-start also requires a hand "above hip level" so resting hands don't
+ * trigger. In shoulder-relative coords (origin at the shoulder line, y down),
+ * the hips sit roughly this many shoulder-widths below the origin; a wrist with
+ * y below this is above hip level.
+ */
+export const SEG_HIP_Y = 1.3;
 
 /* ── Tracking quality (gate on quality.usable, Part 7 §7) ────────────────── */
 
