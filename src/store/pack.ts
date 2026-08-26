@@ -1,5 +1,5 @@
 import { db } from "./db";
-import type { Exemplar, Sign } from "@/content/schema";
+import type { Exemplar, Sign, Provenance } from "@/content/schema";
 import type { NormFrame, TrackingQuality, Handedness } from "@/landmarks/types";
 
 /**
@@ -40,12 +40,18 @@ export type PackTake = {
 export type ExemplarPack = {
   version: 1;
   language: "isl" | "asl";
+  /** ISO timestamp set when a pack is published, so a client can tell whether
+   *  the pack it already holds is current and skip re-importing. */
+  publishedAt?: string;
   signs: {
     id: string;
     english: string;
     hindi: string;
     region: string;
     handedness: Handedness;
+    unit?: string;
+    signerName?: string;
+    provenance?: Provenance;
     takes: PackTake[];
   }[];
 };
@@ -88,6 +94,9 @@ export async function exportPack(language: "isl" | "asl" = "isl"): Promise<Exemp
       hindi: sign.hindi,
       region: sign.region,
       handedness: sign.handedness,
+      unit: sign.unit,
+      signerName: sign.signer.name,
+      provenance: sign.provenance,
       takes: exemplars.map((e) => ({
         takeId: e.id,
         frames: e.frames.map(serializeFrame),
@@ -116,8 +125,9 @@ function signFromPack(p: ExemplarPack["signs"][number], language: "isl" | "asl")
     exemplars: [],
     tolerances: { handshape: 0.7, location: 0.7, movement: 0.7, orientation: 0.7 },
     feedback: { handshape: empty, location: empty, movement: empty, orientation: empty },
-    signer: { name: "", credit: "" },
-    unit: "Right now",
+    signer: { name: p.signerName ?? "", credit: p.signerName ?? "" },
+    unit: p.unit ?? "Right now",
+    provenance: p.provenance,
   };
 }
 
@@ -134,6 +144,7 @@ export async function importPack(pack: ExemplarPack): Promise<{ signs: number; t
         frames: take.frames.map(deserializeFrame),
         quality: take.quality,
         signerId: take.signerId,
+        provenance: p.provenance,
         consent: take.consent,
       };
       await db.exemplars.put(exemplar);

@@ -1,0 +1,178 @@
+/* Content admin. A desk tool, not the parent's app — denser, wider, plainer. */
+
+.admin {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: var(--s-5) var(--gutter) var(--s-8);
+}
+.admin--gate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  max-width: 460px;
+}
+.admin-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--s-5);
+}
+.admin-h1 {
+  font-family: var(--font-display);
+  font-size: var(--t-title);
+  line-height: var(--t-title-lh);
+  font-weight: 400;
+}
+.admin-h2 {
+  font-size: var(--t-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--haldi);
+  margin: var(--s-5) 0 var(--s-3);
+}
+.admin-h2:first-child {
+  margin-top: 0;
+}
+.admin-muted {
+  color: var(--ink-soft);
+  font-size: var(--t-fine);
+  line-height: var(--t-fine-lh);
+}
+.admin-ok {
+  color: var(--sage);
+  font-size: var(--t-fine);
+}
+
+.admin-grid {
+  display: grid;
+  gap: var(--s-5);
+  grid-template-columns: 1fr;
+}
+@media (min-width: 860px) {
+  .admin-grid {
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
+}
+.admin-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+
+.admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  font-size: var(--t-label);
+  color: var(--ink-soft);
+  flex: 1;
+}
+.admin-field input,
+.admin-field select {
+  min-height: 44px;
+  border-radius: var(--r-button);
+  border: 1px solid var(--night-line);
+  background: var(--night);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--t-body);
+  padding: 0 var(--s-3);
+}
+.admin-row {
+  display: flex;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+.admin-check {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  font-size: var(--t-fine);
+  color: var(--ink-soft);
+}
+.admin-check input {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+}
+.admin input[type="file"] {
+  font-size: var(--t-fine);
+  color: var(--ink-soft);
+}
+
+.admin-banner {
+  border-radius: var(--r-button);
+  padding: var(--s-3) var(--s-4);
+  margin-bottom: var(--s-4);
+  background: var(--night-raised);
+  border-left: 3px solid var(--night-line);
+  font-size: var(--t-body);
+}
+.admin-banner--busy {
+  border-left-color: var(--haldi);
+}
+/* No red anywhere in this product, even on the admin surface. */
+.admin-banner--error {
+  border-left-color: var(--dusk);
+}
+
+.admin-takes,
+.admin-library {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.admin-takes li,
+.admin-library li {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  background: var(--night);
+  border: 1px solid var(--night-line);
+  border-radius: var(--r-button);
+  padding: var(--s-2) var(--s-3);
+  font-size: var(--t-fine);
+}
+.admin-takes li span:first-child,
+.admin-lib-word {
+  flex: 1;
+  color: var(--ink);
+  font-size: var(--t-body);
+}
+.admin-lib-word em {
+  font-family: var(--font-display);
+  font-style: normal;
+  color: var(--ink-soft);
+  margin-left: var(--s-2);
+}
+.admin-x {
+  background: none;
+  border: none;
+  color: var(--ink-faint);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 var(--s-2);
+}
+.admin-pill {
+  border: 1px solid var(--dusk);
+  color: var(--dusk);
+  background: transparent;
+  border-radius: var(--r-pill);
+  padding: 4px var(--s-3);
+  font-size: var(--t-fine);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.admin-pill--ok {
+  border-color: var(--sage);
+  color: var(--night);
+  background: var(--sage);
+}

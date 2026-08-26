@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { allSigns, usableExemplarsFor } from "@/store/signs";
+import { useAppStore } from "@/ui/store/appStore";
 import { allProgress } from "@/store/progress";
 import type { Sign } from "@/content/schema";
 
@@ -14,6 +15,7 @@ export type HomeData = {
 
 /** Loads the home-screen state from the on-device store. */
 export function useHomeData(): HomeData {
+  const contentVersion = useAppStore((s) => s.contentVersion);
   const [data, setData] = useState<HomeData>({
     loading: true,
     practiceable: [],
@@ -46,7 +48,7 @@ export function useHomeData(): HomeData {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [contentVersion]);
 
   return data;
 }

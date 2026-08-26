@@ -48,6 +48,9 @@ function save(p: Persisted): void {
 
 type AppState = Persisted & {
   route: Route;
+  /** Bumped when new content is imported, so screens re-read the library. */
+  contentVersion: number;
+  bumpContent: () => void;
   setLang: (lang: Lang) => void;
   toggleLang: () => void;
   setHandedness: (h: Handedness) => void;
@@ -60,6 +63,8 @@ export const useAppStore = create<AppState>((set, get) => {
   return {
     ...persisted,
     route: persisted.onboardComplete ? { name: "menu" } : { name: "onboard" },
+    contentVersion: 0,
+    bumpContent: () => set({ contentVersion: get().contentVersion + 1 }),
 
     setLang: (lang) => {
       set({ lang });

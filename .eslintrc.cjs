@@ -56,6 +56,28 @@ module.exports = {
   },
   overrides: [
     {
+      /**
+       * The parent app must never gain an upload path (SPEC Part 7 s11). The
+       * admin dashboard is a separate Vite entry; nothing the learner loads may
+       * import from it, or its upload code would land in the parent bundle.
+       */
+      files: ["src/ui/**/*.{ts,tsx}", "src/vision/**/*.{ts,tsx}", "src/main.tsx"],
+      rules: {
+        "no-restricted-imports": [
+          "error",
+          {
+            patterns: [
+              {
+                group: ["@/admin/*", "**/admin/*"],
+                message:
+                  "The learner app must not import admin code — it would pull the upload path into the parent bundle (Part 7 s11).",
+              },
+            ],
+          },
+        ],
+      },
+    },
+    {
       // The pure core. No React, no DOM. (Part 6 §6.3, Part 7 §8.)
       files: [
         "src/landmarks/**/*.ts",

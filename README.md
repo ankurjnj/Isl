@@ -77,6 +77,17 @@ convert them with `tools/video_to_keypoints.py`, and load the resulting JSON via
 **Studio → "Import dataset keypoints"**. Everything imported is marked
 *unreviewed* — and labelled as such in Learn — until a Deaf signer confirms it.
 
+## Admin dashboard
+
+`/admin` is a content pipeline for whoever curates signs: add a word, drop in
+3–5 reference clips, and the browser extracts keypoints and publishes them —
+every parent's app picks the pack up on next open. There is no model training
+and no training cost. Setup (Cloudflare R2 + env vars) is in
+**[ADMIN_SETUP.md](ADMIN_SETUP.md)**.
+
+It is a separate Vite entry, and lint blocks the learner app from importing it,
+so the parent bundle never gains an upload path.
+
 ## Deploy (Vercel)
 
 The app is a static SPA — `vite build` emits `dist/`, which Vercel serves
