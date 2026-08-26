@@ -1,5 +1,56 @@
 # Where the sign forms come from
 
+## Start here: the fastest path (about 30 minutes)
+
+You do **not** need the big research corpora, and you do not need to send
+anything to Claude. Three steps, all on your own machine:
+
+**1. Download reference videos of the 20 words.**
+The [ISLRTC dictionary](https://islrtc.nic.in/) is the official Government of
+India ISL dictionary and *every video in it is signed by Deaf signers*, which
+makes it the right source. Their
+[YouTube channel](https://www.youtube.com/channel/UC3AcGIlqVI4nJWCwHgHFXtg)
+carries the same dictionary. [indiansignlanguage.org](https://indiansignlanguage.org/search-dictionary/)
+is the other good source and is organised by regional variant.
+
+Save one clip per word, named after the word — the 20 words are in
+`src/content/vocabulary.ts`:
+
+```
+videos/
+├── milk.mp4      ├── hurt.mp4      ├── mother.mp4
+├── water.mp4     ├── help.mp4      ├── love.mp4     …
+```
+Several takes of the same word? `milk.mp4`, `milk-2.mp4`, `milk-3.mp4`.
+Three to five takes per sign is ideal — the recognizer takes the median
+across takes, so one odd clip can't skew it.
+
+**2. Convert them to keypoints.**
+
+```sh
+pip install "mediapipe==0.10.14" opencv-python
+
+python tools/video_to_keypoints.py videos/ -o isl-pack.json   --region "Delhi"   --signer-id islrtc --signer-name "ISLRTC"   --origin ISLRTC --url https://islrtc.nic.in/ --license "see source terms"
+```
+
+This runs MediaPipe over each video and writes one JSON file — a few MB, no
+video in it. `--region` matters: ISL varies substantially by region and the app
+shows the tag, so use the region your source is from.
+
+**3. Import it.** Open the app → **Add signs** → **Import dataset keypoints** →
+pick `isl-pack.json`. Learn and Test fill up immediately.
+
+Takes the tracker couldn't see clearly are dropped rather than imported — a bad
+exemplar poisons every later comparison. Everything lands marked **unreviewed**,
+and Learn says so on screen, until a Deaf signer confirms each form.
+
+> **Do you need to send Claude anything?** No — the import happens in your
+> browser. If the converter chokes on a file, send just the console output and
+> one short clip, not the dataset.
+
+---
+
+
 Aangan ships with **no sign forms**, and it never generates one. A wrong sign
 taught confidently to a parent who has nobody to correct them is the exact harm
 this product exists to prevent (Part 5.2, Part 7 §1).
@@ -105,9 +156,17 @@ and 33 pose landmarks. Pose indices **11–14** (shoulders and elbows) are requi
 normalization builds its reference frame from the shoulder line, which is what
 makes distance from the camera stop mattering.
 
-Converting a specific corpus to this shape is a small per-corpus script — each
-publishes keypoints in its own layout. `src/content/datasetImport.ts` is the
-target format; `src/content/datasetImport.test.ts` shows a minimal valid file.
+If you start from **videos** (ISLRTC, indiansignlanguage.org, or your own),
+`tools/video_to_keypoints.py` produces this file for you — see "Start here" above.
+
+If you start from a **corpus that already ships keypoints** (OpenHands, iSign),
+you need a small per-corpus script, because each publishes its arrays in its own
+layout. `src/content/datasetImport.ts` is the target format and
+`src/content/datasetImport.test.ts` shows a minimal valid file. The one thing to
+get right is handedness: `hands.left` must be the signer's *own* left hand.
+MediaPipe's raw `Hands` handedness label is image-relative and needs swapping;
+`Holistic` (what the converter uses) derives each hand from the pose wrists and
+is already anatomically correct.
 
 ## After importing
 

@@ -72,8 +72,9 @@ lists the real ISL sources — the ISLRTC official dictionary, the FDMSE
 regional-variant dictionary, and open research corpora (OpenHands / INCLUDE /
 iSign) that publish MediaPipe keypoints from Deaf adult signers.
 
-Those corpora are already in this app's representation, so **Studio → "Import
-dataset keypoints"** loads them straight in. Everything imported is marked
+The quickest route: download reference videos of the 20 words from ISLRTC,
+convert them with `tools/video_to_keypoints.py`, and load the resulting JSON via
+**Studio → "Import dataset keypoints"**. Everything imported is marked
 *unreviewed* — and labelled as such in Learn — until a Deaf signer confirms it.
 
 ## Deploy (Vercel)
