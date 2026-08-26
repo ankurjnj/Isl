@@ -73,12 +73,19 @@ export type Strings = {
     region: string;
     handedness: string;
     record: string;
+    stop: string;
     keep: string;
     discard: string;
     takeUnusable: string;
+    save: string;
     exportPack: string;
     importPack: string;
     saved: string;
+    signerNameLabel: string;
+    signLabel: string;
+    consentLabel: string;
+    consentScope: string;
+    takes: string;
   };
 
   errors: {

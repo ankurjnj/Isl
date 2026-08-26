@@ -226,6 +226,42 @@
   color: var(--ink-soft);
 }
 
+/* ── Studio form ────────────────────────────────────────────────────────── */
+.studio-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+.studio-form label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  font-size: var(--t-label);
+  color: var(--ink-soft);
+}
+.studio-form input,
+.studio-form select {
+  min-height: var(--tap-min);
+  border-radius: var(--r-button);
+  border: 1px solid var(--night-line);
+  background: var(--night);
+  color: var(--ink);
+  font-size: var(--t-body);
+  font-family: inherit;
+  padding: 0 var(--s-3);
+}
+.studio-consent {
+  flex-direction: row !important;
+  align-items: center;
+  gap: var(--s-3) !important;
+}
+.studio-consent input {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  flex: 0 0 auto;
+}
+
 .dev-readout {
   font-size: var(--t-fine);
   color: var(--ink-faint);
