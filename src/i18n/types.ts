@@ -58,6 +58,7 @@ export type Strings = {
     tryAgain: string;
     tooDark: string;
     unsure: string;
+    notRecognized: string;
   };
 
   child: {

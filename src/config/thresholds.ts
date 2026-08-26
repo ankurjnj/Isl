@@ -86,6 +86,18 @@ export const COMPONENT_PASS = 0.7;
 /** Overall score at or above this → "got it". PLACEHOLDER, calibrate with the above. */
 export const OVERALL_PASS = 0.7;
 
+/**
+ * Raw-distance → 0–1 score scales, one per component. A component's score is
+ * clamp(1 - distance / scale). PLACEHOLDERS — the shapes are right (cosine
+ * distance, shoulder-widths, path units, radians) but the exact values must be
+ * tuned against the 30-flawed-attempt fixture set on real exemplars (slice
+ * v0.5). Calibrated: — (not yet).
+ */
+export const HANDSHAPE_COS_SCALE = 0.6; // cosine distance (0..2)
+export const LOCATION_SW_SCALE = 0.5; // shoulder-widths
+export const MOVEMENT_SCALE = 0.5; // path-normalized DTW units
+export const ORIENTATION_RAD_SCALE = Math.PI / 2; // radians (90° → score 0)
+
 /* ── Review queue (store/, Part 6 slice v0.6) ────────────────────────────── */
 
 /** A sign unpractised for this many days re-enters the review queue. */

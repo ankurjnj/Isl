@@ -56,6 +56,7 @@ export const en: Strings = {
     tooDark:
       "Too dark to see your hands. Move nearer to a light, or hold the phone further away.",
     unsure: "I couldn’t read that one clearly — that’s on me, not you. Try once more?",
+    notRecognized: "I don’t recognise that sign. Watch once more and try again?",
   },
 
   child: {

@@ -34,6 +34,7 @@ const NO_AUDIO_SYNTAX = [
 
 module.exports = {
   root: true,
+  ignorePatterns: ["dist", "node_modules", "*.cjs", "vite.config.ts"],
   env: { browser: true, es2021: true, node: true },
   parser: "@typescript-eslint/parser",
   parserOptions: { ecmaVersion: 2021, sourceType: "module" },
