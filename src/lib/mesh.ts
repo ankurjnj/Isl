@@ -1,4 +1,4 @@
-import { Strut, VoxelGrid } from './voxel';
+import { VoxelGrid } from './voxel';
 
 export interface MeshOptions {
   /** Edge length of one QR module, in mm. */
@@ -7,8 +7,6 @@ export interface MeshOptions {
   layerMm: number;
   /** Thickness of the light-coloured base plate, in mm. */
   baseMm: number;
-  /** Welding-post cross-section as a fraction of a module. */
-  strutFrac?: number;
 }
 
 export interface Mesh {
@@ -27,7 +25,7 @@ export interface Mesh {
  * can show that contrast and the slicer gets an unambiguous colour boundary.
  */
 export interface SculptureMesh {
-  /** The artwork and its welding posts. Printed in the dark colour. */
+  /** The sculpture and the code. Printed in the dark colour. */
   body: Mesh;
   /** The plate everything stands on. Printed in the light colour. */
   base: Mesh;
@@ -92,9 +90,8 @@ function box(s: Sink, x0: number, y0: number, z0: number, x1: number, y1: number
  * magnitude. The result is still the exact boundary of the voxel set, so the
  * shape is unchanged.
  */
-export function meshSculpture(grid: VoxelGrid, struts: Strut[], opts: MeshOptions): SculptureMesh {
+export function meshSculpture(grid: VoxelGrid, opts: MeshOptions): SculptureMesh {
   const { moduleMm, layerMm, baseMm } = opts;
-  const strutFrac = opts.strutFrac ?? 0.34;
   const s: Sink = { pos: [], nrm: [] };
 
   const dims = [grid.w, grid.d, grid.h];
@@ -174,17 +171,6 @@ export function meshSculpture(grid: VoxelGrid, struts: Strut[], opts: MeshOption
         }
       }
     }
-  }
-
-  // Welding posts, inset inside their module so they stay invisible from above.
-  const inset = (1 - strutFrac) / 2;
-  for (const st of struts) {
-    if (st.z1 <= st.z0) continue;
-    box(
-      s,
-      (st.x + inset) * moduleMm, (st.y + inset) * moduleMm, baseMm + st.z0 * layerMm,
-      (st.x + 1 - inset) * moduleMm, (st.y + 1 - inset) * moduleMm, baseMm + st.z1 * layerMm,
-    );
   }
 
   const body = drain(s);

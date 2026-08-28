@@ -1,29 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Viewer, { CameraPreset } from './components/Viewer';
 import Projection from './components/Projection';
+import ModelThumb from './components/ModelThumb';
 import { Bitmap } from './lib/bitmap';
-import { rasterizePath } from './lib/raster';
-import { SILHOUETTES, getSilhouette, matchSilhouette } from './lib/silhouettes';
+import { Sdf } from './lib/sdf';
+import { extrudeSilhouette, revolveSilhouette } from './lib/voxelize';
+import { MODELS, getModel, matchModel } from './lib/models3d';
 import { DEFAULT_INPUT, buildDesign, exportObj, exportStl, printingNotes, type Design, type DesignInput } from './lib/pipeline';
 import { downloadBlob, imageFileToBitmap, slugify, textToBitmap } from './lib/browser';
 import type { EccLevel } from './lib/qr';
-import type { Form, ViewMode } from './lib/voxel';
+import type { Support } from './lib/voxel';
 
 type ArtSource =
   | { kind: 'library'; id: string }
   | { kind: 'text'; text: string }
   | { kind: 'upload'; name: string; bitmap: Bitmap };
 
-const SIL_RES = 96;
-
 export default function App() {
   const [payload, setPayload] = useState('https://github.com/ankurjnj/Isl');
   const [prompt, setPrompt] = useState('a cat sitting');
   const [art, setArt] = useState<ArtSource>({ kind: 'library', id: 'cat' });
   const [pinned, setPinned] = useState(false);
-  const [mode, setMode] = useState<ViewMode>('shadow');
-  const [form, setForm] = useState<Form>('rounded');
-  const [depth, setDepth] = useState(DEFAULT_INPUT.depth);
+  const [support, setSupport] = useState<Support>('grounded');
   const [ecc, setEcc] = useState<EccLevel>('H');
   const [height, setHeight] = useState(DEFAULT_INPUT.height);
   const [moduleMm, setModuleMm] = useState(DEFAULT_INPUT.moduleMm);
@@ -37,34 +35,34 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Resolve the prompt to a shape, unless the user has pinned one explicitly.
-  const suggestion = useMemo(() => matchSilhouette(prompt), [prompt]);
+  const suggestion = useMemo(() => matchModel(prompt), [prompt]);
   useEffect(() => {
     if (pinned) return;
-    if (suggestion) setArt({ kind: 'library', id: suggestion.silhouette.id });
+    if (suggestion) setArt({ kind: 'library', id: suggestion.model.id });
     else if (prompt.trim()) setArt({ kind: 'text', text: prompt.trim().split(/\s+/)[0].toUpperCase() });
   }, [suggestion, prompt, pinned]);
 
-  const silhouette = useMemo<Bitmap | null>(() => {
+  const model = useMemo<Sdf | null>(() => {
     try {
-      if (art.kind === 'library') {
-        const s = getSilhouette(art.id);
-        return s ? rasterizePath(s.d, SIL_RES, SIL_RES) : null;
-      }
-      if (art.kind === 'text') return textToBitmap(art.text);
-      return art.bitmap;
+      if (art.kind === 'library') return getModel(art.id)?.sdf ?? null;
+      // Only lettering is extruded, because extruded lettering is what 3D text
+      // actually is. An uploaded outline becomes a lathe: a real solid rather
+      // than a slab.
+      if (art.kind === 'text') return extrudeSilhouette(textToBitmap(art.text));
+      return revolveSilhouette(art.bitmap);
     } catch {
       return null;
     }
   }, [art]);
 
   const design = useMemo<Design | null>(() => {
-    if (!silhouette || !payload.trim()) return null;
+    if (!model || !payload.trim()) return null;
     const input: DesignInput = {
       ...DEFAULT_INPUT,
       payload: payload.trim(),
-      ecc, mode, form, depth, height, moduleMm, layerMm, baseMm,
+      ecc, support, height, moduleMm, layerMm, baseMm,
       plinth: Math.max(2, Math.round(height * 0.07)),
-      silhouette,
+      model,
     };
     try {
       setError(null);
@@ -73,11 +71,11 @@ export default function App() {
       setError(e instanceof Error ? e.message : String(e));
       return null;
     }
-  }, [silhouette, payload, ecc, mode, form, depth, height, moduleMm, layerMm, baseMm]);
+  }, [model, payload, ecc, support, height, moduleMm, layerMm, baseMm]);
 
   const notes = useMemo(
-    () => (design ? printingNotes({ ...DEFAULT_INPUT, payload, ecc, mode, form, depth, height, moduleMm, layerMm, baseMm, silhouette: silhouette! }, design) : []),
-    [design, payload, ecc, mode, form, depth, height, moduleMm, layerMm, baseMm, silhouette],
+    () => (design ? printingNotes({ ...DEFAULT_INPUT, payload, ecc, support, height, moduleMm, layerMm, baseMm, model: model! }, design) : []),
+    [design, payload, ecc, support, height, moduleMm, layerMm, baseMm, model],
   );
 
   const onUpload = async (file: File) => {
@@ -135,22 +133,22 @@ export default function App() {
           />
           <div className="hint">
             {art.kind === 'library' && (
-              <>Using <strong>{getSilhouette(art.id)?.name}</strong>{!pinned && suggestion ? ' — matched from your prompt' : ''}</>
+              <>Using <strong>{getModel(art.id)?.name}</strong>{!pinned && suggestion ? ' — matched from your prompt' : ''}</>
             )}
-            {art.kind === 'text' && <>No shape matched, so the word <strong>{art.text}</strong> will be extruded. Pick one below or upload an image.</>}
-            {art.kind === 'upload' && <>Using uploaded image <strong>{art.name}</strong></>}
+            {art.kind === 'text' && <>No model matched, so the word <strong>{art.text}</strong> is cast as raised lettering. Pick one below or upload an outline.</>}
+            {art.kind === 'upload' && <>Turning <strong>{art.name}</strong> on a lathe</>}
           </div>
 
           <div className="shapes">
-            {SILHOUETTES.map((s) => (
+            {MODELS.map((m) => (
               <button
-                key={s.id}
+                key={m.id}
                 type="button"
-                title={s.name}
-                className={'shape' + (art.kind === 'library' && art.id === s.id ? ' on' : '')}
-                onClick={() => { setArt({ kind: 'library', id: s.id }); setPinned(true); }}
+                title={m.name}
+                className={'shape' + (art.kind === 'library' && art.id === m.id ? ' on' : '')}
+                onClick={() => { setArt({ kind: 'library', id: m.id }); setPinned(true); }}
               >
-                <svg viewBox="0 0 100 100" aria-hidden><path d={s.d} fillRule="evenodd" /></svg>
+                <ModelThumb sdf={m.sdf} />
               </button>
             ))}
           </div>
@@ -172,37 +170,16 @@ export default function App() {
         </section>
 
         <section>
-          <label className="lbl">Side-view style</label>
+          <label className="lbl">Structure</label>
           <div className="seg">
-            <button className={mode === 'shadow' ? 'on' : ''} onClick={() => setMode('shadow')} type="button">Silhouette</button>
-            <button className={mode === 'skyline' ? 'on' : ''} onClick={() => setMode('skyline')} type="button">Skyline</button>
+            <button className={support === 'grounded' ? 'on' : ''} onClick={() => setSupport('grounded')} type="button">Grounded</button>
+            <button className={support === 'solid' ? 'on' : ''} onClick={() => setSupport('solid')} type="button">Solid</button>
           </div>
           <p className="hint">
-            {mode === 'shadow'
-              ? 'A true silhouette, holes and all. Detached parts get thin welding posts.'
-              : 'Only the upper contour, filled solid beneath. Loses interior detail but always prints as one piece.'}
+            {support === 'grounded'
+              ? 'Every column reaches the plate on its own — one piece, no supports, no connecting rods. Shapes that taper are reproduced exactly.'
+              : 'The solid’s true occupancy, overhangs and all. Nothing can bridge sideways here, so parts floating above narrower parts become separate pieces — check the count below.'}
           </p>
-        </section>
-
-        <section>
-          <label className="lbl">Form</label>
-          <div className="seg">
-            <button className={form === 'rounded' ? 'on' : ''} onClick={() => setForm('rounded')} type="button">Rounded</button>
-            <button className={form === 'revolved' ? 'on' : ''} onClick={() => setForm('revolved')} type="button">Turned</button>
-            <button className={form === 'flat' ? 'on' : ''} onClick={() => setForm('flat')} type="button">Flat</button>
-          </div>
-          <p className="hint">
-            {form === 'rounded'
-              ? 'The subject is inflated into a solid — thickest at its core, tapering to its outline. Thin features stay thin.'
-              : form === 'revolved'
-                ? 'Each height’s cross-section is swept around its own centre line, like a turned form.'
-                : 'Constant depth. The side view is swept straight through, so the result is an extrusion rather than a solid.'}
-          </p>
-          {form !== 'flat' && (
-            <Field label={`Depth — ${(depth * 100).toFixed(0)}%`}>
-              <input className="range" type="range" min={0.15} max={1} step={0.05} value={depth} onChange={(e) => setDepth(+e.target.value)} />
-            </Field>
-          )}
         </section>
 
         <section className="grid2">
@@ -249,7 +226,8 @@ export default function App() {
                 <Stat k="Size" v={`${design.dims.widthMm.toFixed(0)} × ${design.dims.depthMm.toFixed(0)} × ${design.dims.heightMm.toFixed(0)} mm`} />
                 <Stat k="Side fidelity" v={`${(design.build.report.sideFidelity * 100).toFixed(0)}%`} />
                 <Stat k="Pieces" v={`${design.build.report.looseParts}`} />
-                <Stat k="Welds" v={`${design.build.report.struts}`} />
+                <Stat k="Overhangs" v={`${design.build.report.overhangs}`} />
+                <Stat k="Outline kept" v={`${(100 - design.build.report.outlineDistortion * 100).toFixed(0)}%`} />
                 <Stat k="Triangles" v={`${(design.mesh.body.triangleCount + design.mesh.base.triangleCount).toLocaleString()}`} />
               </dl>
 

@@ -1,7 +1,7 @@
-import { Bitmap } from './bitmap';
 import { EccLevel, makeQr, QrResult } from './qr';
 import { concatMeshes, meshSculpture, SculptureMesh } from './mesh';
-import { BuildResult, buildSculpture, Form, ViewMode } from './voxel';
+import { BuildResult, buildSculpture, Support } from './voxel';
+import { Sdf } from './sdf';
 import { meshToObj, meshToStl } from './stl';
 import { verifyTopView, VerifyResult } from './verify';
 
@@ -9,12 +9,9 @@ export interface DesignInput {
   payload: string;
   ecc: EccLevel;
   quietZone: number;
-  silhouette: Bitmap;
-  mode: ViewMode;
-  /** How the subject gains depth along y. */
-  form: Form;
-  /** Depth of the thickest point, as a fraction of the available depth. */
-  depth: number;
+  /** The solid to carve the code out of. */
+  model: Sdf;
+  support: Support;
   /** Voxel layers of height. */
   height: number;
   /** Pedestal height in layers. */
@@ -39,12 +36,10 @@ export interface Design {
   warnings: string[];
 }
 
-export const DEFAULT_INPUT: Omit<DesignInput, 'silhouette' | 'payload'> = {
+export const DEFAULT_INPUT: Omit<DesignInput, 'model' | 'payload'> = {
   ecc: 'H',
   quietZone: 4,
-  mode: 'shadow',
-  form: 'rounded',
-  depth: 0.9,
+  support: 'grounded',
   height: 40,
   plinth: 3,
   moduleMm: 2.0,
@@ -54,14 +49,12 @@ export const DEFAULT_INPUT: Omit<DesignInput, 'silhouette' | 'payload'> = {
 
 export function buildDesign(input: DesignInput): Design {
   const qr = makeQr(input.payload, input.ecc, input.quietZone);
-  const build = buildSculpture(qr.bitmap, input.silhouette, qr.quietZone, {
-    mode: input.mode,
-    form: input.form,
-    depth: input.depth,
+  const build = buildSculpture(qr.bitmap, input.model, qr.quietZone, {
+    support: input.support,
     height: input.height,
     plinth: input.plinth,
   });
-  const mesh = meshSculpture(build.grid, build.struts, {
+  const mesh = meshSculpture(build.grid, {
     moduleMm: input.moduleMm,
     layerMm: input.layerMm,
     baseMm: input.baseMm,
@@ -106,28 +99,28 @@ function collectWarnings(
     w.push('The base plate is very thin and may warp or tear off the bed.');
   }
   if (build.report.looseParts > 1) {
-    w.push(`${build.report.looseParts} disconnected pieces — parts of the artwork will fall off. Turn welding on, or use Skyline mode.`);
+    w.push(
+      `${build.report.looseParts} separate pieces — parts of this shape float above narrower parts, ` +
+      'and nothing can bridge sideways to hold them. Switch back to Grounded, or pick a subject that tapers.',
+    );
+  }
+  if (build.report.overhangs > 0) {
+    w.push(`${build.report.overhangs} voxels overhang and will need slicer supports.`);
   }
   if (build.report.blindColumns.length) {
     w.push(
-      `${build.report.blindColumns.length} column(s) of the code are entirely light, so the artwork cannot show anything there. ` +
+      `${build.report.blindColumns.length} column(s) of the code are entirely light, so nothing may stand there. ` +
       'Changing the payload or ECC level reshuffles the code and usually clears it.',
     );
   }
-  if (build.report.sideFidelity < 0.9) {
-    w.push(`Only ${(build.report.sideFidelity * 100).toFixed(0)}% of the side artwork is renderable against this code.`);
+  if (build.report.outlineDistortion > 0.35) {
+    w.push(
+      `Grounding moved ${(build.report.outlineDistortion * 100).toFixed(0)}% of this shape's outline — it re-widens ` +
+      'above a narrow point, so it is losing the feature that made it recognisable. A tapering subject will read better.',
+    );
   }
   if (Math.max(dims.widthMm, dims.depthMm) > 250) {
     w.push(`At ${dims.widthMm.toFixed(0)} mm across this will not fit on most 220–250 mm beds.`);
-  }
-  if (build.report.depthRepairs > 0) {
-    w.push(
-      `${build.report.depthRepairs} cell(s) needed an extra module behind the surface to keep the side view whole. ` +
-      'Increasing depth reduces this.',
-    );
-  }
-  if (input.mode === 'shadow' && build.report.struts > 0) {
-    w.push(`${build.report.struts} thin welding post(s) hold detached parts of the artwork. They are visible up close.`);
   }
   return w;
 }
@@ -144,7 +137,9 @@ export function exportObj(design: Design): string {
 export function printingNotes(input: DesignInput, design: Design): string[] {
   const colourChangeMm = input.baseMm;
   return [
-    `Print with no supports. The artwork is self-supporting above the pedestal; the welding posts are deliberate.`,
+    design.build.report.overhangs === 0
+      ? 'Print with no supports. Every column reaches the plate on its own, so there is nothing to prop up.'
+      : `Enable supports: ${design.build.report.overhangs} voxels overhang.`,
     `Insert a filament change at Z = ${colourChangeMm.toFixed(2)} mm. Below it is the base plate — use a light colour. Above it is the code and the artwork — use a dark, matte colour.`,
     `Layer height must divide ${input.layerMm} mm evenly, so the artwork's steps land on layer boundaries. ${suggestLayerHeights(input.layerMm)}`,
     `Total size ${design.dims.widthMm.toFixed(1)} x ${design.dims.depthMm.toFixed(1)} x ${design.dims.heightMm.toFixed(1)} mm.`,

@@ -1,13 +1,11 @@
 import { makeQr } from '../src/lib/qr';
-import { rasterizePath } from '../src/lib/raster';
-import { getSilhouette } from '../src/lib/silhouettes';
+import { getModel } from '../src/lib/models3d';
 import { buildSculpture, project } from '../src/lib/voxel';
 import { Bitmap } from '../src/lib/bitmap';
 
-const id = process.argv[2] ?? 'cat';
+const id = process.argv[2] ?? 'pine';
 const qr = makeQr('https://example.com/qr3d', 'H');
-const sil = rasterizePath(getSilhouette(id)!.d, 64, 64);
-const built = buildSculpture(qr.bitmap, sil, qr.quietZone, { mode: 'shadow', height: 44 });
+const built = buildSculpture(qr.bitmap, getModel(id)!.sdf, qr.quietZone, { height: 44 });
 const { topAchieved, sideAchieved } = project(built.grid);
 
 const show = (b: Bitmap, label: string, flip = false) => {

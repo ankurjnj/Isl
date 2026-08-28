@@ -8,110 +8,84 @@ Type a link, type a prompt, get an STL.
 
 ## How it works
 
-The naive approach is a heightfield: extrude each dark QR module to a height
-taken from the artwork. It does not work. A heightfield seen from the side is
-only its upper contour — a mountain range — so you can never get a real
-silhouette, and anything with a hole in it (a mug handle, the gap under a cat's
-chin) is lost.
+### The constraint everything follows from
 
-The construction that does work is the voxel Cartesian product, from
-[Shadow Art (Mitra & Pauly, SIGGRAPH Asia 2009)](https://graphics.stanford.edu/~niloy/research/shadowArt/paper_docs/shadowArt_sigA_09_small.pdf).
-Take the QR code `Q(x, y)` and the side artwork `S(x, z)`, and fill a voxel at
-every point where both are solid:
+Anything above the code plane occludes the code. So material may only ever
+stand over a dark module, **at any height**. Which means two parts of the
+sculpture can touch only where their modules are face-adjacent in the code —
+no horizontal bridging is possible anywhere, ever.
 
-```
-V(x, y, z) = Q(x, y) ∧ S(x, z)
-```
+A QR always contains isolated modules. So a shape with a part that floats above
+a narrower part below it — a canopy over a trunk, a cap over a stalk — cannot
+be a single printable object. There are exactly two honest resolutions: hold it
+with rods, or give every column its own path to the ground. This build takes
+the second, so there are no connecting rods anywhere.
 
-The two images share the `x` axis. That is the whole trick, and projecting the
-result back shows exactly what it costs:
+### The construction
 
-```
-top(x, y)  = Q(x, y) ∧ (column x of S is non-empty)
-side(x, z) = S(x, z) ∧ (column x of Q is non-empty)
-```
-
-Each view is reproduced perfectly wherever the *other* image has something in
-the same column, and is blank where it does not. So there are two conditions,
-and they are not equally fixable:
-
-- **The top view is made exact, unconditionally.** A plinth — a pedestal
-  spanning every column of the code — forces "column x of S is non-empty" to
-  hold everywhere the QR has ink. This is not a heuristic that usually works;
-  it closes the only hole in the identity. The code always comes out perfect,
-  which is the one thing that must never be approximate. The artwork also gets
-  seated on that plinth rather than centred, so it stands on its pedestal
-  instead of hovering above it.
-
-- **The side view cannot be.** If a QR column happens to be entirely light, no
-  material may stand there without corrupting the code, so that slice of the
-  artwork is impossible. The app reports these as *blind columns* rather than
-  fudging them. In practice real codes have ink in every column and side
-  fidelity comes out at 100%, but the number is measured, not assumed.
-
-### Giving it depth
-
-That product alone is not yet a sculpture, and it is worth being precise about
-why. At a fixed `x` the solid set is `{y : QR} × {z : S}` — a product. The
-z-structure depends only on `x`, so every pillar in a column shares one height
-profile and the object is a 2D shape swept along `y`. That is an extrusion.
-
-So the depth is made to vary too:
+Subjects are **real 3D solids**, composed from signed-distance primitives —
+cones, frustums, capsules, boxes — and voxelised. The code is then carved out
+of the solid:
 
 ```
-V(x, y, z) = Q(x, y) ∧ S(x, z) ∧ ( |y − c| ≤ D(x, z) )
+V(x, y, z) = QR(x, y) ∧ M(x, y, z)
 ```
 
-`D` is a depth field over the side view, and because it depends on both `x` and
-`z` the slices through the model differ from one another — that difference *is*
-the form. Three fields ship:
+Because `M` is a genuine solid rather than an outline given depth, its
+occupancy varies along every axis, and so does the result. Projecting back:
 
-- **Rounded** (default) inflates the silhouette the way sketch-based modellers
-  do: depth follows distance from the outline, on a circular falloff rather
-  than a linear one, so the surface domes over instead of meeting the edge as a
-  cone. Distance is an exact Euclidean transform rather than a chamfer
-  approximation — chamfer error shows up as faceting along the diagonals of a
-  surface that should read as smooth. Thin features stay thin: a cat's ears are
-  near their own outline everywhere, so they read as ears rather than rods.
-- **Turned** sweeps each height's cross-section around its own centre line, for
-  a lathed, generalised-cylinder form. It uses the per-row centre rather than
-  one global axis, so an off-centre subject bends with its own spine instead of
-  ballooning around the model's middle.
-- **Flat** is the constant-depth case — the extrusion above, kept because it is
-  the cheapest thing to print.
+```
+top(x, y)  = QR(x, y) ∧ (the solid stands somewhere in that column)
+side(x, z) = M's outline ∧ (that code column carries ink somewhere)
+```
 
-Neither guarantee is spent on this. The plinth stays full depth, which is what
-keeps the top view exact however thin the artwork gets above it. And narrowing
-the band can leave a cell whose slice of the code is entirely light, which
-would erode the side view into a ragged outline exactly where the form is
-thinnest — so those cells get the single nearest dark module added behind the
-surface. One module is too small to disturb the silhouette it is protecting,
-and the side view stays as faithful as the flat build: limited only by blind
-columns, never by the depth field.
+The top view is the one that must never be approximate, and the plinth
+guarantees it: a pedestal spanning every data column means each dark module
+carries material regardless of where the sculpture happens to stand. The side
+view needs no such device — it only needs one dark module anywhere across the
+depth, and with tens of columns to draw from it survives at 92–100%.
+
+### Grounding, and why the library looks the way it does
+
+Every column is filled from the plate up to the solid's top surface. That is
+what removes the rods, and it has a price: filling a column downward propagates
+its width all the way down. A shape that re-widens above a narrow point loses
+exactly the feature that made it recognisable — a chess king becomes a taper,
+a mushroom becomes a bell. A shape that **tapers** is reproduced faithfully.
+
+So the library is authored to that constraint rather than against it. Two rules
+came out of testing every candidate:
+
+- **Radius never grows with height.** Standing, tapering subjects are the ones
+  this medium renders: towers, trees, rockets, peaks, seated animals.
+- **Stepped profiles beat smooth ones.** The silhouette is only ~30 modules
+  tall, so a gentle curve becomes an anonymous mound — a snowman, a penguin and
+  a vase all came out as the same nondescript hill. A hard setback survives as
+  a shape you can name, which is why the skyscraper has deco setbacks and the
+  lighthouse has a gallery.
+
+`outlineDistortion` reports what grounding cost each subject, so the trade is
+visible rather than hidden. **Solid** mode is available for the true occupancy
+with overhangs kept — it reports floating pieces honestly rather than welding
+them.
+
+### Supplying the subject
+
+1. **A prompt**, matched against the model library.
+2. **An uploaded image**, turned on a lathe — a genuine solid interpretation of
+   an outline rather than a slab.
+3. **A word**, cast as raised lettering. This is the one extruded case, because
+   extruded lettering is what 3D text actually *is*.
 
 ### Printability
 
-A voxel model that projects correctly can still be unprintable, so three more
-things happen:
-
-- **Connectivity.** Components are found with 6-connectivity — face contact
-  only, since voxels meeting at an edge or corner are not a printable weld.
-  Anything not reaching the plinth gets a thin post dropped under it. A post
-  sits inside a module that is already dark, so it is invisible from above and
-  a hairline from the side.
-- **A base plate.** The dark modules of a QR are not a connected shape, so
-  without a plate underneath they would print as loose pieces. The plate is
-  also what gives a scanner its contrast: light plate, dark code.
-- **Greedy quad meshing.** Six quads per voxel would put a typical model past
-  100k triangles. Merging coplanar faces into maximal rectangles cuts that by
-  an order of magnitude without changing the shape.
-
-### Skyline mode
-
-The alternative mode fills the artwork downward from its upper contour. It
-loses interior detail — the gap between a pair of legs closes up — but it is
-guaranteed to be one connected mass with no posts. Useful when a silhouette is
-too delicate to print.
+- **One piece.** Every column reaches the plate, so nothing falls off.
+- **Zero overhangs**, measured, so it prints with no supports at all.
+- **Zero connecting rods**, by construction rather than by repair.
+- **A base plate**, which gives a scanner its contrast — light plate, dark code
+  — and ties the code's isolated modules together.
+- **Greedy quad meshing**, cutting a naive six-quads-per-voxel mesh by an order
+  of magnitude without changing the shape.
 
 ## Verification
 
@@ -130,9 +104,16 @@ at bottom-right.
 
 **"Looks 3D" is not a claim you can eyeball.** The suite measures it: for each
 column, how many *distinct* height profiles do the open depth slices carry? A
-swept extrusion scores exactly 1.00 by construction. The rounded field scores
-5.83 and the turned field 4.31 on the same subject, which is the difference
-between a shape with form and a shape without.
+shape swept along the depth axis scores exactly 1.00, because every slice
+carries the same profile. The modelled solids score well above that — the
+difference between a shape with form and a shape without.
+
+**"Prints in one piece" is not a claim you can eyeball either.** Every model in
+the library is asserted to come out at exactly one connected piece (6-connected:
+voxels meeting at an edge or a corner are not a printable weld) with zero
+overhanging voxels. A deliberately overhung test shape confirms the reporting
+is real — in Solid mode it comes back as multiple pieces rather than silently
+welded.
 
 **A triangle count says nothing about whether a mesh is printable.** The mesh
 is checked by signed volume via the divergence theorem, which for a closed
@@ -150,7 +131,7 @@ npm install
 npm run dev          # the app
 npm test             # geometry, orientation, mesh, STL, prompt matching
 npm run test:e2e     # browser: decodes the actual painted pixels (dev server must be running)
-npm run shapes       # ASCII-render the silhouette library
+npm run models       # ASCII-render every solid, grounded and code-masked
 npm run views        # ASCII-render both projections of a build
 ```
 
@@ -197,17 +178,19 @@ skull gets its eye sockets.
 
 ```
 src/lib/
+  sdf.ts          3D distance primitives and combinators
+  models3d.ts     the solids, and the prompt matcher
+  voxelize.ts     lathe and lettering adapters for 2D input
+  voxel.ts        the construction, plinth, grounding, fidelity report
   bitmap.ts       binary rasters, fitting, projection helpers
   qr.ts           QR module matrix, quiet zone included
   path.ts         SVG path parser and bezier flattener
   raster.ts       supersampled scanline polygon fill; image thresholding
-  silhouettes.ts  the shape library and prompt matcher
-  voxel.ts        the construction, plinth, welding, fidelity report
-  mesh.ts         greedy quad meshing, base plate, posts
+  mesh.ts         greedy quad meshing and the base plate
   stl.ts          binary STL and OBJ
   verify.ts       decodes the model's own top-down projection
   pipeline.ts     input -> design, with warnings and printing notes
-src/components/   three.js viewer, exact projection canvas
+src/components/   three.js viewer, exact projection canvas, model thumbnails
 ```
 
 The viewer's camera is orthographic, and that is not a style choice: the

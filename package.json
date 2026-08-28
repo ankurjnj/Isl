@@ -10,7 +10,7 @@
     "test": "tsx test/pipeline.test.ts",
     "test:e2e": "node test/e2e.mjs",
     "build:artifact": "vite build --config vite.artifact.config.ts && node scripts/build-artifact.mjs",
-    "shapes": "tsx test/preview.ts",
+    "models": "tsx test/models.ts",
     "views": "tsx test/views.ts"
   },
   "dependencies": {
