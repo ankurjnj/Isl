@@ -17,6 +17,10 @@
 
 html, body, #root { height: 100%; margin: 0; }
 
+/* Fall back to the viewport when the page is embedded in a host that does not
+   give the html/body chain a height of its own. */
+.app { min-height: 100dvh; }
+
 body {
   background: var(--bg);
   color: var(--text);

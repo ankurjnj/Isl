@@ -90,6 +90,15 @@ export default function App() {
 
   const name = slugify(prompt || payload);
 
+  const save = async (data: BlobPart, filename: string, type: string) => {
+    try {
+      setError(null);
+      await downloadBlob(data, filename, type);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'could not save the file');
+    }
+  };
+
   return (
     <div className="app">
       <aside className="panel">
@@ -231,14 +240,14 @@ export default function App() {
                 className="btn"
                 type="button"
                 disabled={!design.verify.matches}
-                onClick={() => downloadBlob(exportStl(design, name), `${name}.stl`, 'model/stl')}
+                onClick={() => { void save(exportStl(design, name), `${name}.stl`, 'model/stl'); }}
               >
                 Download STL
               </button>
               <button
                 className="btn ghost"
                 type="button"
-                onClick={() => downloadBlob(exportObj(design), `${name}.obj`, 'text/plain')}
+                onClick={() => { void save(exportObj(design), `${name}.obj`, 'text/plain'); }}
               >
                 OBJ
               </button>

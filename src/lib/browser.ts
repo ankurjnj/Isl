@@ -56,9 +56,40 @@ export function textToBitmap(text: string, size = 256): Bitmap {
   return thresholdImageData(data, size, size, { threshold: 128 });
 }
 
-export function downloadBlob(data: BlobPart, filename: string, type: string): void {
-  const blob = new Blob([data], { type });
-  const url = URL.createObjectURL(blob);
+/**
+ * Hand the viewer a file.
+ *
+ * Locally this is an ordinary anchor download. When the page is running inside
+ * a sandboxed host that blocks page-initiated downloads, the anchor is silently
+ * inert, so a host-provided save channel is tried first when one exists. That
+ * channel enforces its own extension allowlist, which does not include the mesh
+ * formats -- hence the explicit failure path rather than a silent no-op, so the
+ * caller can tell the user why nothing happened instead of leaving them
+ * clicking a dead button.
+ */
+export async function downloadBlob(data: BlobPart, filename: string, type: string): Promise<void> {
+  const host = (globalThis as { claude?: { use?: (n: string) => Promise<unknown> } }).claude;
+  if (host?.use) {
+    const downloads = (await host.use('downloads').catch(() => null)) as
+      | { save: (r: { filename: string; data: Blob }) => Promise<unknown> }
+      | null;
+    if (downloads) {
+      try {
+        await downloads.save({ filename, data: new Blob([data], { type }) });
+        return;
+      } catch (e) {
+        const code = (e as { code?: string })?.code;
+        if (code === 'declined') return; // the viewer said no; nothing to report
+        throw new Error(
+          code === 'rejected_extension' || code === 'extension_not_enabled'
+            ? `This hosted preview cannot save .${filename.split('.').pop()} files. Run the app locally to export the model.`
+            : `Save failed (${code ?? 'unknown'}).`,
+        );
+      }
+    }
+  }
+
+  const url = URL.createObjectURL(new Blob([data], { type }));
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
