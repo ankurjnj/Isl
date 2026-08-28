@@ -18,6 +18,46 @@ export interface Mesh {
   triangleCount: number;
 }
 
+/**
+ * The two printed volumes, kept apart.
+ *
+ * They are separate because they must be *printed* separately: the contrast a
+ * scanner needs comes from the base being a different colour to the body, via
+ * a filament change at the base height. Splitting them here means the viewer
+ * can show that contrast and the slicer gets an unambiguous colour boundary.
+ */
+export interface SculptureMesh {
+  /** The artwork and its welding posts. Printed in the dark colour. */
+  body: Mesh;
+  /** The plate everything stands on. Printed in the light colour. */
+  base: Mesh;
+}
+
+function drain(s: Sink): Mesh {
+  const mesh: Mesh = {
+    positions: new Float32Array(s.pos),
+    normals: new Float32Array(s.nrm),
+    triangleCount: s.pos.length / 9,
+  };
+  s.pos = [];
+  s.nrm = [];
+  return mesh;
+}
+
+/** Concatenate meshes, for exporting one printable file. */
+export function concatMeshes(...meshes: Mesh[]): Mesh {
+  const tris = meshes.reduce((a, m) => a + m.triangleCount, 0);
+  const positions = new Float32Array(tris * 9);
+  const normals = new Float32Array(tris * 9);
+  let o = 0;
+  for (const m of meshes) {
+    positions.set(m.positions, o);
+    normals.set(m.normals, o);
+    o += m.positions.length;
+  }
+  return { positions, normals, triangleCount: tris };
+}
+
 interface Sink {
   pos: number[];
   nrm: number[];
@@ -52,7 +92,7 @@ function box(s: Sink, x0: number, y0: number, z0: number, x1: number, y1: number
  * magnitude. The result is still the exact boundary of the voxel set, so the
  * shape is unchanged.
  */
-export function meshSculpture(grid: VoxelGrid, struts: Strut[], opts: MeshOptions): Mesh {
+export function meshSculpture(grid: VoxelGrid, struts: Strut[], opts: MeshOptions): SculptureMesh {
   const { moduleMm, layerMm, baseMm } = opts;
   const strutFrac = opts.strutFrac ?? 0.34;
   const s: Sink = { pos: [], nrm: [] };
@@ -136,13 +176,6 @@ export function meshSculpture(grid: VoxelGrid, struts: Strut[], opts: MeshOption
     }
   }
 
-  // Base plate: the light-coloured slab everything stands on. It is what gives
-  // the top view its contrast, and it ties the QR's isolated dark modules into
-  // one printable piece.
-  if (baseMm > 0) {
-    box(s, 0, 0, 0, grid.w * moduleMm, grid.d * moduleMm, baseMm);
-  }
-
   // Welding posts, inset inside their module so they stay invisible from above.
   const inset = (1 - strutFrac) / 2;
   for (const st of struts) {
@@ -154,9 +187,13 @@ export function meshSculpture(grid: VoxelGrid, struts: Strut[], opts: MeshOption
     );
   }
 
-  return {
-    positions: new Float32Array(s.pos),
-    normals: new Float32Array(s.nrm),
-    triangleCount: s.pos.length / 9,
-  };
+  const body = drain(s);
+
+  // Base plate: the light-coloured slab everything stands on. It is what gives
+  // the top view its contrast, and it ties the QR's isolated dark modules into
+  // one printable piece.
+  if (baseMm > 0) box(s, 0, 0, 0, grid.w * moduleMm, grid.d * moduleMm, baseMm);
+  const base = drain(s);
+
+  return { body, base };
 }

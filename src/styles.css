@@ -1,0 +1,249 @@
+:root {
+  --bg: #0b0d12;
+  --panel: #12151c;
+  --panel-2: #171b24;
+  --line: #232936;
+  --text: #e7ecf5;
+  --dim: #8b95a8;
+  --accent: #6ea8ff;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  --radius: 10px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  height: 100%;
+}
+
+/* ---------- panel ---------- */
+
+.panel {
+  overflow-y: auto;
+  padding: 20px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.brand { display: flex; gap: 12px; align-items: center; }
+.brand h1 { margin: 0; font-size: 17px; letter-spacing: .04em; }
+.brand p { margin: 2px 0 0; font-size: 12px; color: var(--dim); }
+
+.logo {
+  width: 34px; height: 34px; border-radius: 8px; flex: none;
+  background:
+    conic-gradient(from 45deg, #6ea8ff, #a78bfa, #6ea8ff);
+  mask: radial-gradient(circle at 30% 30%, #000 38%, transparent 39%),
+        linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+section { display: flex; flex-direction: column; gap: 8px; }
+
+.lbl {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: var(--dim);
+  font-weight: 600;
+}
+
+.input {
+  width: 100%;
+  padding: 9px 11px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  font: inherit;
+}
+.input:focus { outline: none; border-color: var(--accent); }
+select.input { cursor: pointer; }
+
+.hint { font-size: 12px; color: var(--dim); margin: 0; }
+.hint strong { color: var(--text); font-weight: 600; }
+
+.row { display: flex; gap: 8px; align-items: center; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+.range { width: 100%; accent-color: var(--accent); }
+
+.check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--dim); cursor: pointer; }
+.check input { accent-color: var(--accent); }
+
+.btn {
+  padding: 9px 14px;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: #06101f;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+  flex: 1;
+}
+.btn:hover:not(:disabled) { filter: brightness(1.08); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.btn.ghost { background: transparent; border-color: var(--line); color: var(--text); flex: none; }
+.btn.ghost:hover { border-color: var(--accent); }
+
+/* ---------- shape picker ---------- */
+
+.shapes {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
+}
+.shape {
+  aspect-ratio: 1;
+  padding: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.shape:hover { border-color: var(--dim); }
+.shape.on { border-color: var(--accent); background: #1b2740; }
+.shape svg { width: 100%; height: 100%; fill: var(--dim); }
+.shape.on svg { fill: var(--accent); }
+
+/* ---------- segmented control ---------- */
+
+.seg {
+  display: inline-flex;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 2px;
+  gap: 2px;
+}
+.seg button {
+  flex: 1;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.seg button.on { background: var(--accent); color: #06101f; font-weight: 600; }
+
+/* ---------- readouts ---------- */
+
+.verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 13px;
+  border-radius: var(--radius);
+  border-left: 3px solid;
+  font-size: 12px;
+  color: var(--dim);
+}
+.verdict strong { font-size: 13px; }
+.verdict.ok { background: #0f2418; border-color: var(--ok); }
+.verdict.ok strong { color: var(--ok); }
+.verdict.bad { background: #2a1315; border-color: var(--bad); }
+.verdict.bad strong { color: var(--bad); }
+
+.stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  margin: 0;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.stat { background: var(--panel-2); padding: 8px 10px; }
+.stat dt { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+.stat dd { margin: 2px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+
+.alert {
+  padding: 9px 11px;
+  border-radius: var(--radius);
+  font-size: 12px;
+  border-left: 3px solid;
+}
+.alert.warn { background: #2a2312; border-color: var(--warn); color: #f3e3bd; }
+.alert.bad { background: #2a1315; border-color: var(--bad); color: #f8cfd0; }
+
+.notes { font-size: 12px; color: var(--dim); }
+.notes summary { cursor: pointer; color: var(--text); font-weight: 600; }
+.notes ol { margin: 10px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 7px; }
+
+/* ---------- stage ---------- */
+
+.stage { display: flex; flex-direction: column; min-width: 0; }
+
+.stagebar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.stagebar-right { display: flex; align-items: center; gap: 12px; }
+
+.stagebody { flex: 1; min-height: 0; position: relative; }
+
+.viewer {
+  position: absolute;
+  inset: 0;
+  /* Lighter than the panel on purpose: the model is deliberately near-black
+     to match the printed filament, so it needs a ground to read against. */
+  background: radial-gradient(125% 125% at 50% 8%, #3b4453 0%, #171b23 72%);
+}
+.viewer canvas { display: block; }
+
+.flat {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+}
+.proj {
+  max-width: min(560px, 100%);
+  height: auto;
+  image-rendering: pixelated;
+  border-radius: 6px;
+  box-shadow: 0 8px 40px #0008;
+}
+.caption { max-width: 460px; text-align: center; font-size: 12px; color: var(--dim); margin: 0; }
+
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .panel { border-right: 0; border-bottom: 1px solid var(--line); max-height: 55vh; }
+  .stagebody { min-height: 380px; }
+}

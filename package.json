@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc -b --noEmit && vite build",
     "preview": "vite preview",
-    "test": "tsx test/pipeline.test.ts"
+    "test": "tsx test/pipeline.test.ts",
+    "test:e2e": "node test/e2e.mjs",
+    "shapes": "tsx test/preview.ts",
+    "views": "tsx test/views.ts"
   },
   "dependencies": {
     "jsqr": "^1.4.0",
@@ -17,10 +20,12 @@
     "three": "^0.170.0"
   },
   "devDependencies": {
+    "@types/node": "^26.4.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@types/three": "^0.170.0",
     "@vitejs/plugin-react": "^4.3.3",
+    "playwright": "^1.62.1",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"

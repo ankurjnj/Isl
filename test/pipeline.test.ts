@@ -2,7 +2,7 @@ import { makeQr } from '../src/lib/qr';
 import { rasterizePath } from '../src/lib/raster';
 import { SILHOUETTES, matchSilhouette } from '../src/lib/silhouettes';
 import { buildSculpture, project } from '../src/lib/voxel';
-import { meshSculpture } from '../src/lib/mesh';
+import { concatMeshes, meshSculpture } from '../src/lib/mesh';
 import { meshToStl } from '../src/lib/stl';
 import { verifyTopView } from '../src/lib/verify';
 import { countSet } from '../src/lib/bitmap';
@@ -57,6 +57,38 @@ for (const s of SILHOUETTES) {
   }
 }
 
+console.log('\n== printed orientation (mirror check) ==');
+{
+  // A mirrored QR still decodes in jsQR, so decoding proves nothing about
+  // orientation. The finder patterns do: a QR has them at top-left, top-right
+  // and bottom-left, never bottom-right. Looking down at the print with +x to
+  // the right puts +y upward, so image row r must sit at physical y = d-1-r.
+  const qr = makeQr(payload, 'H');
+  const sil = rasterizePath(SILHOUETTES[0].d, 64, 64);
+  const built = buildSculpture(qr.bitmap, sil, qr.quietZone, {});
+  const g = built.grid;
+  const qz = qr.quietZone;
+  const c = qz + 3; // centre of a finder pattern, in modules from the code edge
+  const far = g.d - 1 - c;
+  const solidAt = (x: number, y: number) => {
+    for (let z = 0; z < g.h; z++) if (g.data[(z * g.d + y) * g.w + x]) return true;
+    return false;
+  };
+  const nearX = c;
+  const farX = g.w - 1 - c;
+  check('finder at physical top-left', solidAt(nearX, far));
+  check('finder at physical top-right', solidAt(farX, far));
+  check('finder at physical bottom-left', solidAt(nearX, c));
+  check('no finder at physical bottom-right', !solidAt(farX, c));
+
+  // And the reported top view is back in image space, matching the input.
+  let same = true;
+  for (let i = 0; i < qr.bitmap.data.length; i++) {
+    if (built.topAchieved.data[i] !== qr.bitmap.data[i]) { same = false; break; }
+  }
+  check('reported top view equals the requested code', same);
+}
+
 console.log('\n== side view actually reproduces the art ==');
 {
   const qr = makeQr(payload, 'H');
@@ -79,7 +111,9 @@ console.log('\n== mesh + STL ==');
   const qr = makeQr(payload, 'H');
   const sil = rasterizePath(SILHOUETTES[2].d, 64, 64);
   const built = buildSculpture(qr.bitmap, sil, qr.quietZone, {});
-  const mesh = meshSculpture(built.grid, built.struts, { moduleMm: 2, layerMm: 2, baseMm: 2 });
+  const parts = meshSculpture(built.grid, built.struts, { moduleMm: 2, layerMm: 2, baseMm: 2 });
+  const mesh = concatMeshes(parts.body, parts.base);
+  check('base plate is a closed box', parts.base.triangleCount === 12);
   const stl = meshToStl(mesh);
   check('mesh has triangles', mesh.triangleCount > 100, `${mesh.triangleCount} tris`);
   check('stl size matches header', stl.byteLength === 84 + mesh.triangleCount * 50, `${(stl.byteLength / 1024).toFixed(0)} KB`);

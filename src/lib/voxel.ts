@@ -186,19 +186,32 @@ export function buildSculpture(
     for (let x = quietZone; x < w - quietZone; x++) S.data[z * w + x] = 1;
   }
 
-  // V = QR AND S.
+  // V = QR AND S, with the code flipped into physical space.
+  //
+  // The QR bitmap is image space: row 0 is the top of the picture. The grid is
+  // physical space: +y is a direction on the table. An observer looking down at
+  // the print with +x to their right necessarily sees +y going *up* their view,
+  // so laying row 0 at y = 0 would put the top of the code nearest them and the
+  // printed object would read as a vertical mirror of the intended code. A
+  // mirrored QR is not a rotated QR -- no amount of turning the print fixes it,
+  // and most phone scanners refuse it outright. So the code is flipped here,
+  // once, and the projections are flipped back before they are reported.
+  const qrPhysical = flipY(qr);
   const grid: VoxelGrid = { w, d, h, data: new Uint8Array(w * d * h) };
   for (let z = 0; z < h; z++) {
     for (let x = 0; x < w; x++) {
       if (!S.data[z * w + x]) continue;
       for (let y = 0; y < d; y++) {
-        if (qr.data[y * w + x]) grid.data[(z * d + y) * w + x] = 1;
+        if (qrPhysical.data[y * w + x]) grid.data[(z * d + y) * w + x] = 1;
       }
     }
   }
 
   const struts = weld ? weldFloatingParts(grid, plinth) : [];
-  const { topAchieved, sideAchieved } = project(grid);
+  const projected = project(grid);
+  // Back to image space, so callers compare against the QR they asked for.
+  const topAchieved = flipY(projected.topAchieved);
+  const sideAchieved = projected.sideAchieved; // (x, z): untouched by a y flip.
 
   // Everything the caller asked for on the side, before feasibility masking.
   const sideRequested = S;
