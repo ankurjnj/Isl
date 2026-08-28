@@ -7,7 +7,7 @@ import { SILHOUETTES, getSilhouette, matchSilhouette } from './lib/silhouettes';
 import { DEFAULT_INPUT, buildDesign, exportObj, exportStl, printingNotes, type Design, type DesignInput } from './lib/pipeline';
 import { downloadBlob, imageFileToBitmap, slugify, textToBitmap } from './lib/browser';
 import type { EccLevel } from './lib/qr';
-import type { ViewMode } from './lib/voxel';
+import type { Form, ViewMode } from './lib/voxel';
 
 type ArtSource =
   | { kind: 'library'; id: string }
@@ -22,6 +22,8 @@ export default function App() {
   const [art, setArt] = useState<ArtSource>({ kind: 'library', id: 'cat' });
   const [pinned, setPinned] = useState(false);
   const [mode, setMode] = useState<ViewMode>('shadow');
+  const [form, setForm] = useState<Form>('rounded');
+  const [depth, setDepth] = useState(DEFAULT_INPUT.depth);
   const [ecc, setEcc] = useState<EccLevel>('H');
   const [height, setHeight] = useState(DEFAULT_INPUT.height);
   const [moduleMm, setModuleMm] = useState(DEFAULT_INPUT.moduleMm);
@@ -60,7 +62,7 @@ export default function App() {
     const input: DesignInput = {
       ...DEFAULT_INPUT,
       payload: payload.trim(),
-      ecc, mode, height, moduleMm, layerMm, baseMm,
+      ecc, mode, form, depth, height, moduleMm, layerMm, baseMm,
       plinth: Math.max(2, Math.round(height * 0.07)),
       silhouette,
     };
@@ -71,11 +73,11 @@ export default function App() {
       setError(e instanceof Error ? e.message : String(e));
       return null;
     }
-  }, [silhouette, payload, ecc, mode, height, moduleMm, layerMm, baseMm]);
+  }, [silhouette, payload, ecc, mode, form, depth, height, moduleMm, layerMm, baseMm]);
 
   const notes = useMemo(
-    () => (design ? printingNotes({ ...DEFAULT_INPUT, payload, ecc, mode, height, moduleMm, layerMm, baseMm, silhouette: silhouette! }, design) : []),
-    [design, payload, ecc, mode, height, moduleMm, layerMm, baseMm, silhouette],
+    () => (design ? printingNotes({ ...DEFAULT_INPUT, payload, ecc, mode, form, depth, height, moduleMm, layerMm, baseMm, silhouette: silhouette! }, design) : []),
+    [design, payload, ecc, mode, form, depth, height, moduleMm, layerMm, baseMm, silhouette],
   );
 
   const onUpload = async (file: File) => {
@@ -180,6 +182,27 @@ export default function App() {
               ? 'A true silhouette, holes and all. Detached parts get thin welding posts.'
               : 'Only the upper contour, filled solid beneath. Loses interior detail but always prints as one piece.'}
           </p>
+        </section>
+
+        <section>
+          <label className="lbl">Form</label>
+          <div className="seg">
+            <button className={form === 'rounded' ? 'on' : ''} onClick={() => setForm('rounded')} type="button">Rounded</button>
+            <button className={form === 'revolved' ? 'on' : ''} onClick={() => setForm('revolved')} type="button">Turned</button>
+            <button className={form === 'flat' ? 'on' : ''} onClick={() => setForm('flat')} type="button">Flat</button>
+          </div>
+          <p className="hint">
+            {form === 'rounded'
+              ? 'The subject is inflated into a solid — thickest at its core, tapering to its outline. Thin features stay thin.'
+              : form === 'revolved'
+                ? 'Each height’s cross-section is swept around its own centre line, like a turned form.'
+                : 'Constant depth. The side view is swept straight through, so the result is an extrusion rather than a solid.'}
+          </p>
+          {form !== 'flat' && (
+            <Field label={`Depth — ${(depth * 100).toFixed(0)}%`}>
+              <input className="range" type="range" min={0.15} max={1} step={0.05} value={depth} onChange={(e) => setDepth(+e.target.value)} />
+            </Field>
+          )}
         </section>
 
         <section className="grid2">

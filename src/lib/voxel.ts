@@ -35,6 +35,10 @@ export interface Strut {
 
 export interface BuildOptions {
   mode?: ViewMode;
+  /** How the subject gains depth along y. */
+  form?: Form;
+  /** Depth of the thickest point, as a fraction of the available depth. */
+  depth?: number;
   /** Height of the voxel grid, in modules. */
   height?: number;
   /** Height of the solid pedestal under the artwork, in modules. */
@@ -57,6 +61,9 @@ export interface BuildResult {
 
 export interface BuildReport {
   mode: ViewMode;
+  form: Form;
+  /** Cells where the depth band held no code, so one nearest module was added. */
+  depthRepairs: number;
   /** Fraction of requested QR modules that survive into the top view. 1 = exact. */
   topFidelity: number;
   /** Fraction of requested silhouette pixels that survive into the side view. */
@@ -94,6 +101,129 @@ function fillDownward(s: Bitmap): Bitmap {
       if (s.data[z * s.w + x]) { top = z; break; }
     }
     for (let z = 0; z <= top; z++) out.data[z * s.w + x] = 1;
+  }
+  return out;
+}
+
+/**
+ * How the subject is given depth.
+ *
+ * `flat` is the degenerate case, and it is worth naming why: with a constant
+ * depth the solid set at a fixed x is {y : QR} x {z : S}, a product. The
+ * z-structure then depends only on x, so every pillar in a column shares one
+ * height profile and the object is a 2D shape swept along y -- an extrusion,
+ * not a sculpture. The other two forms make the depth vary with (x, z), which
+ * is what gives the model real three-dimensional shape.
+ */
+export type Form = 'flat' | 'rounded' | 'revolved';
+
+/**
+ * Exact squared Euclidean distance transform (Felzenszwalb & Huttenlocher).
+ *
+ * Returns, for every set pixel, the squared distance to the nearest clear
+ * pixel -- so distance to the silhouette's own outline. Exact Euclidean rather
+ * than a chamfer approximation because this drives a visible surface: chamfer
+ * error shows up as faceting along the diagonals of a form that should read as
+ * smoothly rounded.
+ */
+function edtSquared(b: Bitmap): Float64Array {
+  const INF = 1e20;
+  const f = new Float64Array(b.w * b.h);
+  for (let i = 0; i < f.length; i++) f[i] = b.data[i] ? INF : 0;
+
+  const run = (n: number, get: (i: number) => number, put: (i: number, v: number) => void) => {
+    const v = new Int32Array(n);
+    const z = new Float64Array(n + 1);
+    const src = new Float64Array(n);
+    for (let i = 0; i < n; i++) src[i] = get(i);
+    let k = 0;
+    v[0] = 0;
+    z[0] = -INF;
+    z[1] = INF;
+    for (let q = 1; q < n; q++) {
+      let s = ((src[q] + q * q) - (src[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (k > 0 && s <= z[k]) {
+        k--;
+        s = ((src[q] + q * q) - (src[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      }
+      k++;
+      v[k] = q;
+      z[k] = s;
+      z[k + 1] = INF;
+    }
+    k = 0;
+    for (let q = 0; q < n; q++) {
+      while (z[k + 1] < q) k++;
+      put(q, (q - v[k]) * (q - v[k]) + src[v[k]]);
+    }
+  };
+
+  const col = new Float64Array(b.h);
+  for (let x = 0; x < b.w; x++) {
+    run(b.h, (y) => f[y * b.w + x], (y, val) => { col[y] = val; });
+    for (let y = 0; y < b.h; y++) f[y * b.w + x] = col[y];
+  }
+  const row = new Float64Array(b.w);
+  for (let y = 0; y < b.h; y++) {
+    run(b.w, (x) => f[y * b.w + x], (x, val) => { row[x] = val; });
+    for (let x = 0; x < b.w; x++) f[y * b.w + x] = row[x];
+  }
+  return f;
+}
+
+/**
+ * Half-depth, in modules, for every cell of the artwork.
+ *
+ * `rounded` inflates the silhouette the way sketch-based modellers do: depth
+ * follows distance from the outline, on a circular falloff rather than a linear
+ * one, so the surface domes over instead of meeting the edge as a cone. Thin
+ * features stay thin -- a cat's ears are near their own outline everywhere, so
+ * they read as ears and not as rods.
+ *
+ * `revolved` sweeps each height's cross-section around the local centre line,
+ * giving a turned, generalised-cylinder form. It uses the per-row centre rather
+ * than one global axis so an off-centre subject bends with its own spine
+ * instead of ballooning around the model's middle.
+ */
+function buildDepthMap(art: Bitmap, form: Form, maxHalf: number): Float64Array {
+  const out = new Float64Array(art.w * art.h);
+
+  if (form === 'flat') {
+    for (let i = 0; i < out.length; i++) out[i] = art.data[i] ? maxHalf : 0;
+    return out;
+  }
+
+  if (form === 'revolved') {
+    for (let z = 0; z < art.h; z++) {
+      let lo = -1, hi = -1;
+      for (let x = 0; x < art.w; x++) {
+        if (art.data[z * art.w + x]) { if (lo < 0) lo = x; hi = x; }
+      }
+      if (lo < 0) continue;
+      const cx = (lo + hi) / 2;
+      const r = (hi - lo) / 2 + 0.5;
+      for (let x = lo; x <= hi; x++) {
+        if (!art.data[z * art.w + x]) continue;
+        const dx = x - cx;
+        out[z * art.w + x] = Math.sqrt(Math.max(0, r * r - dx * dx));
+      }
+    }
+    // Normalise so the widest point reaches the requested depth.
+    let peak = 0;
+    for (const v of out) if (v > peak) peak = v;
+    if (peak > 0) for (let i = 0; i < out.length; i++) out[i] *= maxHalf / peak;
+    return out;
+  }
+
+  const sq = edtSquared(art);
+  let peak = 0;
+  for (const v of sq) if (v > peak) peak = v;
+  const norm = Math.sqrt(peak) || 1;
+  for (let i = 0; i < out.length; i++) {
+    if (!art.data[i]) continue;
+    const t = Math.min(1, Math.sqrt(sq[i]) / norm);
+    // Circular profile: 0 at the outline, maxHalf at the thickest point.
+    out[i] = maxHalf * Math.sqrt(Math.max(0, 2 * t - t * t));
   }
   return out;
 }
@@ -181,6 +311,8 @@ export function buildSculpture(
   opts: BuildOptions = {},
 ): BuildResult {
   const mode = opts.mode ?? 'shadow';
+  const form = opts.form ?? 'rounded';
+  const depthScale = Math.min(1, Math.max(0.05, opts.depth ?? 0.9));
   const h = Math.max(4, Math.round(opts.height ?? Math.round(qr.w * 0.75)));
   const plinth = Math.max(1, Math.round(opts.plinth ?? Math.max(1, Math.round(h * 0.06))));
   const weld = opts.weld ?? true;
@@ -225,12 +357,59 @@ export function buildSculpture(
   // and most phone scanners refuse it outright. So the code is flipped here,
   // once, and the projections are flipped back before they are reported.
   const qrPhysical = flipY(qr);
+
+  // The depth field. Material may only sit within +/- D(x, z) of the model's
+  // centre plane, which is what stops the sweep along y from being constant and
+  // turns the result into a solid with actual form.
+  //
+  // The plinth is exempt and stays full depth. That is not cosmetic: the top
+  // view is exact only because every data column carries material at some
+  // height, and a pedestal spanning the full depth is what keeps that true no
+  // matter how thin the artwork gets above it.
+  const maxHalf = (dataW / 2) * depthScale;
+  const depthMap = buildDepthMap(art, form, maxHalf);
+  const cy = (d - 1) / 2;
+
   const grid: VoxelGrid = { w, d, h, data: new Uint8Array(w * d * h) };
+  let depthRepairs = 0;
+
   for (let z = 0; z < h; z++) {
     for (let x = 0; x < w; x++) {
       if (!S.data[z * w + x]) continue;
-      for (let y = 0; y < d; y++) {
-        if (qrPhysical.data[y * w + x]) grid.data[(z * d + y) * w + x] = 1;
+
+      let y0 = 0;
+      let y1 = d - 1;
+      if (z >= plinth) {
+        const half = depthMap[(z - plinth) * dataW + (x - quietZone)];
+        y0 = Math.max(0, Math.ceil(cy - half));
+        y1 = Math.min(d - 1, Math.floor(cy + half));
+      }
+
+      let any = false;
+      for (let y = y0; y <= y1; y++) {
+        if (qrPhysical.data[y * w + x]) {
+          grid.data[(z * d + y) * w + x] = 1;
+          any = true;
+        }
+      }
+
+      // Repair. Narrowing the band can leave a cell whose slice of the code is
+      // entirely light, which would erode the side view into a ragged outline
+      // exactly where the form is thinnest. Adding the single nearest dark
+      // module keeps the side view as faithful as the flat build -- limited
+      // only by blind columns, never by the depth field -- and one module is
+      // too small to disturb the silhouette it is protecting.
+      if (!any) {
+        for (let r = 1; r < d && !any; r++) {
+          for (const y of [Math.round(cy) - r, Math.round(cy) + r]) {
+            if (y < 0 || y >= d || any) continue;
+            if (qrPhysical.data[y * w + x]) {
+              grid.data[(z * d + y) * w + x] = 1;
+              any = true;
+              depthRepairs++;
+            }
+          }
+        }
       }
     }
   }
@@ -254,6 +433,8 @@ export function buildSculpture(
   const wantSide = countSet(sideRequested);
   const report: BuildReport = {
     mode,
+    form,
+    depthRepairs,
     topFidelity: wantTop ? countSet(intersect(topAchieved, qr)) / wantTop : 1,
     sideFidelity: wantSide ? countSet(intersect(sideAchieved, sideRequested)) / wantSide : 1,
     blindColumns,

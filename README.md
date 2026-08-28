@@ -49,6 +49,46 @@ and they are not equally fixable:
   fudging them. In practice real codes have ink in every column and side
   fidelity comes out at 100%, but the number is measured, not assumed.
 
+### Giving it depth
+
+That product alone is not yet a sculpture, and it is worth being precise about
+why. At a fixed `x` the solid set is `{y : QR} × {z : S}` — a product. The
+z-structure depends only on `x`, so every pillar in a column shares one height
+profile and the object is a 2D shape swept along `y`. That is an extrusion.
+
+So the depth is made to vary too:
+
+```
+V(x, y, z) = Q(x, y) ∧ S(x, z) ∧ ( |y − c| ≤ D(x, z) )
+```
+
+`D` is a depth field over the side view, and because it depends on both `x` and
+`z` the slices through the model differ from one another — that difference *is*
+the form. Three fields ship:
+
+- **Rounded** (default) inflates the silhouette the way sketch-based modellers
+  do: depth follows distance from the outline, on a circular falloff rather
+  than a linear one, so the surface domes over instead of meeting the edge as a
+  cone. Distance is an exact Euclidean transform rather than a chamfer
+  approximation — chamfer error shows up as faceting along the diagonals of a
+  surface that should read as smooth. Thin features stay thin: a cat's ears are
+  near their own outline everywhere, so they read as ears rather than rods.
+- **Turned** sweeps each height's cross-section around its own centre line, for
+  a lathed, generalised-cylinder form. It uses the per-row centre rather than
+  one global axis, so an off-centre subject bends with its own spine instead of
+  ballooning around the model's middle.
+- **Flat** is the constant-depth case — the extrusion above, kept because it is
+  the cheapest thing to print.
+
+Neither guarantee is spent on this. The plinth stays full depth, which is what
+keeps the top view exact however thin the artwork gets above it. And narrowing
+the band can leave a cell whose slice of the code is entirely light, which
+would erode the side view into a ragged outline exactly where the form is
+thinnest — so those cells get the single nearest dark module added behind the
+surface. One module is too small to disturb the silhouette it is protecting,
+and the side view stays as faithful as the flat build: limited only by blind
+columns, never by the depth field.
+
 ### Printability
 
 A voxel model that projects correctly can still be unprintable, so three more
@@ -87,6 +127,12 @@ mirrored QR is not a rotated QR: no amount of turning the print fixes it. The
 suites assert on finder-pattern corners instead, which are asymmetric by
 construction — a QR has them at top-left, top-right and bottom-left, and never
 at bottom-right.
+
+**"Looks 3D" is not a claim you can eyeball.** The suite measures it: for each
+column, how many *distinct* height profiles do the open depth slices carry? A
+swept extrusion scores exactly 1.00 by construction. The rounded field scores
+5.83 and the turned field 4.31 on the same subject, which is the difference
+between a shape with form and a shape without.
 
 **A triangle count says nothing about whether a mesh is printable.** The mesh
 is checked by signed volume via the divergence theorem, which for a closed

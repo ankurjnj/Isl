@@ -1,7 +1,7 @@
 import { Bitmap } from './bitmap';
 import { EccLevel, makeQr, QrResult } from './qr';
 import { concatMeshes, meshSculpture, SculptureMesh } from './mesh';
-import { BuildResult, buildSculpture, ViewMode } from './voxel';
+import { BuildResult, buildSculpture, Form, ViewMode } from './voxel';
 import { meshToObj, meshToStl } from './stl';
 import { verifyTopView, VerifyResult } from './verify';
 
@@ -11,6 +11,10 @@ export interface DesignInput {
   quietZone: number;
   silhouette: Bitmap;
   mode: ViewMode;
+  /** How the subject gains depth along y. */
+  form: Form;
+  /** Depth of the thickest point, as a fraction of the available depth. */
+  depth: number;
   /** Voxel layers of height. */
   height: number;
   /** Pedestal height in layers. */
@@ -39,6 +43,8 @@ export const DEFAULT_INPUT: Omit<DesignInput, 'silhouette' | 'payload'> = {
   ecc: 'H',
   quietZone: 4,
   mode: 'shadow',
+  form: 'rounded',
+  depth: 0.9,
   height: 40,
   plinth: 3,
   moduleMm: 2.0,
@@ -50,6 +56,8 @@ export function buildDesign(input: DesignInput): Design {
   const qr = makeQr(input.payload, input.ecc, input.quietZone);
   const build = buildSculpture(qr.bitmap, input.silhouette, qr.quietZone, {
     mode: input.mode,
+    form: input.form,
+    depth: input.depth,
     height: input.height,
     plinth: input.plinth,
   });
@@ -111,6 +119,12 @@ function collectWarnings(
   }
   if (Math.max(dims.widthMm, dims.depthMm) > 250) {
     w.push(`At ${dims.widthMm.toFixed(0)} mm across this will not fit on most 220–250 mm beds.`);
+  }
+  if (build.report.depthRepairs > 0) {
+    w.push(
+      `${build.report.depthRepairs} cell(s) needed an extra module behind the surface to keep the side view whole. ` +
+      'Increasing depth reduces this.',
+    );
   }
   if (input.mode === 'shadow' && build.report.struts > 0) {
     w.push(`${build.report.struts} thin welding post(s) hold detached parts of the artwork. They are visible up close.`);

@@ -57,6 +57,56 @@ for (const s of SILHOUETTES) {
   }
 }
 
+console.log('\n== the model is a sculpture, not an extrusion ==');
+{
+  // The direct test of three-dimensionality. Take every depth slice y that the
+  // code leaves open and record its height profile. If depth is constant, the
+  // solid set at a fixed x is the product {y : QR} x {z : S}, so every slice
+  // carries an identical profile and the object is a 2D shape swept along y.
+  // A real solid has slices that differ -- that difference IS its form.
+  const PLINTH = 3;
+  const distinctProfiles = (mode: 'flat' | 'rounded' | 'revolved') => {
+    const qr = makeQr(payload, 'H');
+    const sil = rasterizePath(SILHOUETTES.find((s) => s.id === 'cat')!.d, 64, 64);
+    const g = buildSculpture(qr.bitmap, sil, qr.quietZone, { form: mode, height: 40, plinth: PLINTH }).grid;
+    let total = 0, columns = 0;
+    for (let x = 0; x < g.w; x++) {
+      const seen = new Set<string>();
+      for (let y = 0; y < g.d; y++) {
+        let prof = '';
+        for (let z = PLINTH; z < g.h; z++) prof += g.data[(z * g.d + y) * g.w + x] ? '1' : '0';
+        // Only slices that reach the artwork; the pedestal is full-depth by
+        // design and says nothing about the subject's form.
+        if (prof.includes('1')) seen.add(prof);
+      }
+      if (seen.size) { total += seen.size; columns++; }
+    }
+    return total / columns; // mean distinct height profiles per column
+  };
+
+  const flat = distinctProfiles('flat');
+  const rounded = distinctProfiles('rounded');
+  const revolved = distinctProfiles('revolved');
+  check('flat really is a swept extrusion', flat === 1, `${flat.toFixed(2)} profiles/column`);
+  check('rounded has genuine depth structure', rounded > 3, `${rounded.toFixed(2)} profiles/column`);
+  check('revolved has genuine depth structure', revolved > 3, `${revolved.toFixed(2)} profiles/column`);
+}
+
+console.log('\n== depth never costs the two views ==');
+for (const form of ['flat', 'rounded', 'revolved'] as const) {
+  const qr = makeQr(payload, 'H');
+  for (const id of ['cat', 'rocket', 'butterfly', 'anchor']) {
+    const sil = rasterizePath(SILHOUETTES.find((s) => s.id === id)!.d, 64, 64);
+    const built = buildSculpture(qr.bitmap, sil, qr.quietZone, { form });
+    const v = verifyTopView(project(built.grid).topAchieved, payload);
+    // flipY back to image space, as buildSculpture does for its own report.
+    const ok = built.report.topFidelity === 1 && built.report.sideFidelity === 1 && built.report.looseParts === 1;
+    check(`${form}/${id}: both views intact`, ok && v.matches,
+      `top=${(built.report.topFidelity * 100).toFixed(0)}% side=${(built.report.sideFidelity * 100).toFixed(0)}% ` +
+      `repairs=${built.report.depthRepairs} parts=${built.report.looseParts}`);
+  }
+}
+
 console.log('\n== printed orientation (mirror check) ==');
 {
   // A mirrored QR still decodes in jsQR, so decoding proves nothing about
