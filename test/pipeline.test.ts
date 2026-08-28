@@ -122,6 +122,72 @@ console.log('\n== mesh + STL ==');
   check('no NaN in positions', mesh.positions.every(Number.isFinite));
 }
 
+console.log('\n== the mesh is a closed, correctly-wound solid ==');
+{
+  // Signed volume via the divergence theorem. For a closed surface with
+  // outward-facing triangles this equals the true volume exactly; a hole makes
+  // it wrong, and inverted winding makes it negative. That single number
+  // therefore checks watertightness and orientation at once -- both of which a
+  // slicer needs and neither of which the triangle count would reveal.
+  const signedVolume = (m: { positions: Float32Array; triangleCount: number }) => {
+    let v = 0;
+    for (let t = 0; t < m.triangleCount; t++) {
+      const o = t * 9;
+      const [ax, ay, az] = [m.positions[o], m.positions[o + 1], m.positions[o + 2]];
+      const [bx, by, bz] = [m.positions[o + 3], m.positions[o + 4], m.positions[o + 5]];
+      const [cx, cy, cz] = [m.positions[o + 6], m.positions[o + 7], m.positions[o + 8]];
+      v += (ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)) / 6;
+    }
+    return v;
+  };
+
+  const moduleMm = 2, layerMm = 1.5, baseMm = 2.4, strutFrac = 0.34;
+  for (const id of ['cat', 'rocket', 'butterfly', 'skull']) {
+    const qr = makeQr(payload, 'H');
+    const sil = rasterizePath(SILHOUETTES.find((s) => s.id === id)!.d, 64, 64);
+    const built = buildSculpture(qr.bitmap, sil, qr.quietZone, {});
+    const parts = meshSculpture(built.grid, built.struts, { moduleMm, layerMm, baseMm, strutFrac });
+
+    const voxelVol = built.report.solidVoxels * moduleMm * moduleMm * layerMm;
+    const strutVol = built.struts.reduce(
+      (a, st) => a + (st.z1 - st.z0) * layerMm * (strutFrac * moduleMm) ** 2, 0);
+    const baseVol = built.grid.w * moduleMm * built.grid.d * moduleMm * baseMm;
+
+    const gotBody = signedVolume(parts.body);
+    const gotBase = signedVolume(parts.base);
+    // Positions are float32 and the sum runs over tens of thousands of
+    // triangles, so the tolerance is relative. It still resolves ~1/100th of a
+    // single voxel, far finer than the smallest hole this could miss.
+    const eps = Math.max(0.05, voxelVol * 1e-5);
+    // Struts are separate closed boxes that may overlap the body where they
+    // meet it, so the body total is bounded rather than exact.
+    const okBody = gotBody >= voxelVol - eps && gotBody <= voxelVol + strutVol + eps;
+    check(`${id}: body is closed and outward-wound`, okBody,
+      `${gotBody.toFixed(0)} mm3 in [${voxelVol.toFixed(0)}, ${(voxelVol + strutVol).toFixed(0)}]`);
+    check(`${id}: base plate volume exact`, Math.abs(gotBase - baseVol) < eps,
+      `${gotBase.toFixed(1)} vs ${baseVol.toFixed(1)} mm3`);
+  }
+}
+
+console.log('\n== STL round-trips ==');
+{
+  const qr = makeQr(payload, 'H');
+  const sil = rasterizePath(SILHOUETTES[0].d, 64, 64);
+  const built = buildSculpture(qr.bitmap, sil, qr.quietZone, {});
+  const parts = meshSculpture(built.grid, built.struts, { moduleMm: 2, layerMm: 2, baseMm: 2 });
+  const mesh = concatMeshes(parts.body, parts.base);
+  const stl = meshToStl(mesh, 'roundtrip');
+  const view = new DataView(stl);
+  check('header declares the right triangle count', view.getUint32(80, true) === mesh.triangleCount);
+  // Spot-check the last triangle, where any offset arithmetic error would land.
+  const last = 84 + (mesh.triangleCount - 1) * 50;
+  let matches = true;
+  for (let k = 0; k < 9; k++) {
+    if (Math.abs(view.getFloat32(last + 12 + k * 4, true) - mesh.positions[(mesh.triangleCount - 1) * 9 + k]) > 1e-4) matches = false;
+  }
+  check('last triangle survives the round trip', matches);
+}
+
 console.log('\n== prompt matching ==');
 {
   const cases: [string, string][] = [
