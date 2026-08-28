@@ -121,6 +121,34 @@ function dropToFloor(s: Bitmap): Bitmap {
 }
 
 /**
+ * Drop the empty layers above the artwork.
+ *
+ * The height control sets how much room the artwork *may* use, not how much it
+ * does. A wide, short subject -- an extruded word, a mountain range -- fits by
+ * width and leaves most of that room empty. Keeping those layers would make the
+ * model report a height several times the real object's, mis-frame the viewer,
+ * and hand the slicer a bounding box that does not match what it prints.
+ */
+function trimHeight(g: VoxelGrid): VoxelGrid {
+  let top = -1;
+  const layer = g.w * g.d;
+  for (let z = g.h - 1; z >= 0 && top < 0; z--) {
+    for (let i = 0; i < layer; i++) {
+      if (g.data[z * layer + i]) { top = z; break; }
+    }
+  }
+  const h = Math.max(1, top + 1);
+  if (h === g.h) return g;
+  return { w: g.w, d: g.d, h, data: g.data.slice(0, h * layer) };
+}
+
+/** Crop a side-view bitmap (x, z) to match a trimmed grid. */
+function trimBitmapHeight(b: Bitmap, h: number): Bitmap {
+  if (h >= b.h) return b;
+  return { w: b.w, h, data: b.data.slice(0, h * b.w) };
+}
+
+/**
  * Build the dual-view sculpture.
  *
  * The construction is the voxel Cartesian product of the two target images:
@@ -207,14 +235,15 @@ export function buildSculpture(
     }
   }
 
-  const struts = weld ? weldFloatingParts(grid, plinth) : [];
-  const projected = project(grid);
+  const trimmed = trimHeight(grid);
+  const struts = weld ? weldFloatingParts(trimmed, plinth) : [];
+  const projected = project(trimmed);
   // Back to image space, so callers compare against the QR they asked for.
   const topAchieved = flipY(projected.topAchieved);
   const sideAchieved = projected.sideAchieved; // (x, z): untouched by a y flip.
 
   // Everything the caller asked for on the side, before feasibility masking.
-  const sideRequested = S;
+  const sideRequested = trimBitmapHeight(S, trimmed.h);
   const qrCols = columnNonEmpty(qr);
   const blindColumns: number[] = [];
   for (let x = quietZone; x < w - quietZone; x++) {
@@ -228,12 +257,12 @@ export function buildSculpture(
     topFidelity: wantTop ? countSet(intersect(topAchieved, qr)) / wantTop : 1,
     sideFidelity: wantSide ? countSet(intersect(sideAchieved, sideRequested)) / wantSide : 1,
     blindColumns,
-    solidVoxels: grid.data.reduce((a, b) => a + b, 0),
+    solidVoxels: trimmed.data.reduce((a, b) => a + b, 0),
     struts: struts.length,
-    looseParts: countComponents(grid, struts),
+    looseParts: countComponents(trimmed, struts),
   };
 
-  return { grid, struts, topAchieved, sideAchieved, sideRequested, report };
+  return { grid: trimmed, struts, topAchieved, sideAchieved, sideRequested, report };
 }
 
 function intersect(a: Bitmap, b: Bitmap): Bitmap {
