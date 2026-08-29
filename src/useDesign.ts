@@ -24,6 +24,7 @@ export function useDesign(input: Omit<DesignInput, 'model'> | null, source: Mode
   const [state, setState] = useState<DesignState>({ design: null, error: null, pending: true });
   const workerRef = useRef<Worker | null>(null);
   const latest = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     let worker: Worker | null = null;
@@ -35,14 +36,36 @@ export function useDesign(input: Omit<DesignInput, 'model'> | null, source: Mode
     workerRef.current = worker;
     if (!worker) return;
 
-    worker.onmessage = (e: MessageEvent<{ id: number; ok: boolean; design?: WorkerDesign; error?: string }>) => {
+    const finish = (id: number, next: DesignState) => {
       // Ignore anything but the newest request: a slow build started before the
       // user's last edit must not overwrite a newer result.
-      if (e.data.id !== latest.current) return;
-      if (e.data.ok && e.data.design) setState({ design: e.data.design, error: null, pending: false });
-      else setState({ design: null, error: e.data.error ?? 'build failed', pending: false });
+      if (id !== latest.current) return;
+      clearTimeout(timer.current);
+      setState(next);
     };
-    return () => { worker?.terminate(); workerRef.current = null; };
+
+    worker.onmessage = (e: MessageEvent<{ id: number; ok: boolean; design?: WorkerDesign; error?: string }>) => {
+      finish(e.data.id, e.data.ok && e.data.design
+        ? { design: e.data.design, error: null, pending: false }
+        : { design: null, error: e.data.error ?? 'build failed', pending: false });
+    };
+
+    // A worker that dies -- out of memory on a large grid, say -- sends nothing
+    // at all. Without these the page would sit on "Rebuilding" forever, which
+    // is a worse failure than an error message.
+    worker.onerror = (e) => {
+      e.preventDefault();
+      finish(latest.current, { design: null, error: 'The build ran out of room. Try less detail or a smaller code.', pending: false });
+    };
+    worker.onmessageerror = () => {
+      finish(latest.current, { design: null, error: 'The build result could not be read back.', pending: false });
+    };
+
+    return () => {
+      clearTimeout(timer.current);
+      worker?.terminate();
+      workerRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -53,6 +76,13 @@ export function useDesign(input: Omit<DesignInput, 'model'> | null, source: Mode
     const worker = workerRef.current;
     if (worker) {
       worker.postMessage({ id, input, source } satisfies BuildRequest);
+      // Last resort. Even a bounded build can be starved or wedged, and no
+      // result at all must still end in something the user can act on.
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => {
+        if (id !== latest.current) return;
+        setState({ design: null, error: 'The build took too long. Try less detail or a smaller code.', pending: false });
+      }, 45000);
       return;
     }
     // Inline fallback, so the app still works where workers are unavailable.

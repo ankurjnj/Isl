@@ -242,17 +242,69 @@ export function probeMaxSpan(qr: Bitmap, quietZone: number, moduleCount: number,
   return best;
 }
 
-/** Voxels with nothing directly beneath them: what a slicer must prop up. */
+/**
+ * Cells with no support within a 45-degree cone beneath them.
+ *
+ * "Nothing directly below" is the wrong test: in a voxel model every sloped
+ * surface offsets by a cell per layer, so a gentle, perfectly printable slope
+ * would count as overhang at every step. What a printer actually cannot bridge
+ * is material with nothing under it anywhere in the 3x3 below -- steeper than
+ * 45 degrees, which is roughly where FDM stops holding.
+ */
 export function countOverhangs(g: VoxelGrid): number {
+  const N = g.w * g.d;
   let n = 0;
   for (let z = 1; z < g.h; z++) {
     for (let y = 0; y < g.d; y++) {
       for (let x = 0; x < g.w; x++) {
-        if (g.data[idx(g, x, y, z)] && !g.data[idx(g, x, y, z - 1)]) n++;
+        if (!g.data[z * N + y * g.w + x]) continue;
+        if (!supportedBelow(g, x, y, z)) n++;
       }
     }
   }
   return n;
+}
+
+/** Is there material within the 3x3 directly beneath (x, y, z)? */
+export function supportedBelow(g: VoxelGrid, x: number, y: number, z: number): boolean {
+  const N = g.w * g.d;
+  for (let dy = -1; dy <= 1; dy++) {
+    const yy = y + dy;
+    if (yy < 0 || yy >= g.d) continue;
+    for (let dx = -1; dx <= 1; dx++) {
+      const xx = x + dx;
+      if (xx < 0 || xx >= g.w) continue;
+      if (g.data[(z - 1) * N + yy * g.w + xx]) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Shave the model back to what prints without supports.
+ *
+ * Sweeping upward and removing anything with no material in the 3x3 beneath
+ * leaves a solid every part of which rests on the layer below at 45 degrees or
+ * shallower. It costs shape -- a tree's canopy stops flaring and becomes a cone
+ * rising from its trunk -- but it is the difference between a model that needs
+ * support material threaded through it and one that does not.
+ *
+ * The code is untouched: removing material can only ever leave a module lighter,
+ * and the tile beneath already carries every dark module.
+ */
+export function makeSelfSupporting(g: VoxelGrid, fromZ: number): number {
+  const N = g.w * g.d;
+  let removed = 0;
+  for (let z = Math.max(1, fromZ); z < g.h; z++) {
+    for (let y = 0; y < g.d; y++) {
+      for (let x = 0; x < g.w; x++) {
+        const p = z * N + y * g.w + x;
+        if (!g.data[p]) continue;
+        if (!supportedBelow(g, x, y, z)) { g.data[p] = 0; removed++; }
+      }
+    }
+  }
+  return removed;
 }
 
 /**

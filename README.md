@@ -154,6 +154,16 @@ within half a percentage point, and the tile exactly the same size. It also
 asserts that at full span the sculpture covers every module while the quiet zone
 stays completely clear.
 
+**A build is asserted to terminate, whatever the settings.** The suite drives
+the largest code at full span and maximum detail and requires it to finish
+promptly, with detail — not size or version — being what gave way. The browser
+suite drags every slider to its maximum and requires the page to settle rather
+than sit on "Rebuilding", which is the failure a user actually hits.
+
+**Self-supporting is asserted to mean what it says**: zero cells overhanging
+steeper than 45°, still one piece, still scanning, and with the code bit-for-bit
+unchanged by the shaving.
+
 **Printability is asserted at the defaults.** The suite requires the shipped
 settings to come out "comfortable", requires a fine-grained alternative to be
 flagged rather than silently shipped, and checks that a nozzle too coarse for

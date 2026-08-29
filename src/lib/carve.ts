@@ -1,6 +1,6 @@
 import { Bitmap, flipY, makeBitmap } from './bitmap';
 import { Sdf } from './sdf';
-import { VoxelGrid } from './voxel';
+import { makeSelfSupporting, VoxelGrid } from './voxel';
 
 /**
  * Carve the sculpture out of the code, so it camouflages into the pattern.
@@ -39,6 +39,14 @@ export interface CarveOptions {
   xySub: number;
   /** Layers of raised code beneath the sculpture. */
   tileLayers: number;
+  /**
+   * Shave the sculpture back to what prints without support material.
+   *
+   * Cheap for anything architectural -- a rocket or a lighthouse loses a few
+   * percent -- and expensive for anything that flares, since a tree's canopy or
+   * a mushroom's cap is exactly the shape a printer cannot bridge.
+   */
+  selfSupport: boolean;
 }
 
 export interface CarveResult {
@@ -53,6 +61,8 @@ export interface CarveResult {
   bridges: number;
   /** Fragments too small to be worth a bridge, removed instead. */
   droppedSpecks: number;
+  /** Share of the carved model shaved away to make it self-supporting. */
+  shavedFraction: number;
   /** Supports added under parts that reached nothing. One column each. */
   filledColumns: number;
   /** Voxels the filling added, against the carved total. */
@@ -251,9 +261,18 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
   // A connected footprint does not guarantee a connected solid: two adjacent
   // columns can hold material at heights that never meet. Whatever is still
   // adrift is propped up, one module column each.
-  const before = countSolid(grid);
+  const carvedTotal = countSolid(grid);
   const filledColumns = fillStragglers(grid, tile, xySub, setModule);
   const after = countSolid(grid);
+
+  // Shave overhangs last, after the props are in.
+  //
+  // Erosion cascades: remove a layer and the one above loses its support too.
+  // Run before propping, that ate a seated cat down to a fifth of itself. Run
+  // after, each prop anchors a 45-degree cone around itself and the shape
+  // mostly survives -- the same reason a real print needs only a few support
+  // towers rather than a solid block.
+  const shaved = opts.selfSupport ? makeSelfSupporting(grid, tile) : 0;
 
   return {
     grid,
@@ -262,9 +281,10 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
     originModule,
     xySub,
     droppedSpecks: dropped,
+    shavedFraction: carvedTotal ? shaved / carvedTotal : 0,
     bridges: bridges.length,
     filledColumns,
-    fillFraction: before ? (after - before) / before : 0,
+    fillFraction: carvedTotal ? (after - carvedTotal) / carvedTotal : 0,
     looseParts: componentCount(grid),
   };
 }
@@ -354,27 +374,58 @@ function fillStragglers(
   return filled;
 }
 
+/**
+ * Label connected bodies, using the connectivity a printer actually gives.
+ *
+ * Within a layer, only face contact counts: two cells meeting at a corner are
+ * laid down as separate beads and do not fuse. Between layers it is different --
+ * a cell resting anywhere on the 3x3 beneath it overlaps that material as it is
+ * extruded and bonds to it, which is precisely why a 45-degree wall prints at
+ * all. Treating those as separate would report a self-supporting model, the one
+ * built to print cleanly, as though it were in pieces.
+ */
 function labelAnchored(g: VoxelGrid, tile: number) {
   const label = new Int32Array(g.data.length);
   const anchored = new Set<number>();
   const N = g.w * g.d;
   const stack: number[] = [];
   let id = 0;
+
+  const pushNeighbours = (p: number, x: number, y: number, z: number) => {
+    if (x > 0) stack.push(p - 1);
+    if (x < g.w - 1) stack.push(p + 1);
+    if (y > 0) stack.push(p - g.w);
+    if (y < g.d - 1) stack.push(p + g.w);
+    for (const dz of [-1, 1]) {
+      const zz = z + dz;
+      if (zz < 0 || zz >= g.h) continue;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= g.d) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= g.w) continue;
+          stack.push(zz * N + yy * g.w + xx);
+        }
+      }
+    }
+  };
+
   for (let s = 0; s < g.data.length; s++) {
     if (!g.data[s] || label[s]) continue;
     id++;
     let touches = false;
     label[s] = id;
-    stack.push(s);
-    while (stack.length) {
-      const p = stack.pop()!;
+    const work = [s];
+    while (work.length) {
+      const p = work.pop()!;
       const x = p % g.w, y = Math.floor(p / g.w) % g.d, z = Math.floor(p / N);
       if (z < tile) touches = true;
-      for (const q of [
-        x > 0 ? p - 1 : -1, x < g.w - 1 ? p + 1 : -1,
-        y > 0 ? p - g.w : -1, y < g.d - 1 ? p + g.w : -1,
-        z > 0 ? p - N : -1, z < g.h - 1 ? p + N : -1,
-      ]) if (q >= 0 && g.data[q] && !label[q]) { label[q] = id; stack.push(q); }
+      stack.length = 0;
+      pushNeighbours(p, x, y, z);
+      for (const q of stack) {
+        if (g.data[q] && !label[q]) { label[q] = id; work.push(q); }
+      }
     }
     if (touches) anchored.add(id);
   }

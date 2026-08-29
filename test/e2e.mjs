@@ -235,6 +235,38 @@ check('the app reports the design as printable at the defaults',
   await page.locator('.verdict.print.ok').isVisible(),
   printVerdict.replace(/\n/g, ' · '));
 
+// Changing levels must always come back to something. Unbounded, the largest
+// code at full detail took a minute and could exhaust the worker's memory, and
+// with no error handler on the worker the page then sat on "Rebuilding" for
+// good -- which is what a user actually hits when they drag the sliders up.
+const heavy = await page.evaluate(async () => {
+  const ranges = [...document.querySelectorAll('input[type=range]')];
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  const set = (el, v) => {
+    setValue.call(el, String(v));
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  // Sculpture size to full, detail to max, code grid to max.
+  set(ranges[0], ranges[0].max);
+  set(ranges[1], ranges[1].max);
+  set(ranges[3], ranges[3].max);
+  const start = performance.now();
+  return new Promise((res) => {
+    const tick = () => {
+      const busy = [...document.querySelectorAll('.hint')].some((h) => h.textContent.includes('Rebuilding'));
+      const done = document.querySelector('.verdict.scan') || document.querySelector('.alert.bad');
+      if (!busy && done) res({ ms: performance.now() - start, stuck: false });
+      else if (performance.now() - start > 60000) res({ ms: performance.now() - start, stuck: true });
+      else setTimeout(tick, 100);
+    };
+    tick();
+  });
+});
+check('the heaviest settings still settle, never stick on Rebuilding', !heavy.stuck,
+  `settled in ${(heavy.ms / 1000).toFixed(1)}s`);
+check('and produce a usable result', (await page.locator('.verdict.scan').count()) > 0
+  || (await page.locator('.alert.bad').count()) > 0);
+
 check('no page errors', errors.length === 0, errors.join(' | '));
 
 await page.screenshot({ path: join(OUT, 'e2e-model.png') }).catch(() => {});

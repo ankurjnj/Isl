@@ -14,7 +14,7 @@ console.log('model        span  bridges  dropped  supports  added  pieces  decod
 for (const m of MODELS) {
   if (only && m.id !== only) continue;
   const r = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, m.sdf,
-    { span: 0.72, zSub: 2, xySub: 3, tileLayers: 2 });
+    { span: 0.72, zSub: 2, xySub: 3, tileLayers: 2, selfSupport: true });
   const ok = verifyTopView(r.code, payload).matches;
   console.log(
     m.id.padEnd(12), String(r.spanModules).padStart(4), String(r.bridges).padStart(8),

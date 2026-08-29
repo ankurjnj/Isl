@@ -99,7 +99,7 @@ for (const m of MODELS) {
   const qr = makeQr(payload, 'H', 4, DEFAULT_INPUT.version);
   const bare = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, m.sdf,
     { span: DEFAULT_INPUT.span, zSub: DEFAULT_INPUT.zSub, xySub: DEFAULT_INPUT.xySub,
-      tileLayers: DEFAULT_INPUT.tileLayers });
+      tileLayers: DEFAULT_INPUT.tileLayers, selfSupport: DEFAULT_INPUT.selfSupport });
   const d = design({ model: m.sdf });
   check(m.id, d.report.looseParts === 1 && d.verify.matches && d.report.fillFraction < 0.08,
     `${bare.bridges} bridges, ${d.report.supports} supports, +${(d.report.fillFraction * 100).toFixed(0)}% material`);
@@ -219,7 +219,7 @@ console.log('\n== bridging pays only for what is worth keeping ==');
   // module, so nothing is left loose.
   const qr = makeQr(payload, 'H', 4, DEFAULT_INPUT.version);
   const opts = { span: DEFAULT_INPUT.span, zSub: DEFAULT_INPUT.zSub, xySub: DEFAULT_INPUT.xySub,
-    tileLayers: DEFAULT_INPUT.tileLayers };
+    tileLayers: DEFAULT_INPUT.tileLayers, selfSupport: DEFAULT_INPUT.selfSupport };
   const c = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, getModel('castle')!.sdf, opts);
   check('specks are dropped rather than bridged', c.droppedSpecks > c.bridges * 0.5,
     `${c.droppedSpecks} dropped vs ${c.bridges} bridged`);
@@ -248,8 +248,13 @@ console.log('\n== detail finer than the code costs the code nothing ==');
   // sharpening the sculpture must not move the pattern at all.
   const coarse = design({ xySub: 1, zSub: 1 });
   const fine = design({ xySub: 4, zSub: 4 });
-  check('finer cells really are finer', fine.report.cellMm < coarse.report.cellMm / 3.5,
-    `${coarse.report.cellMm.toFixed(2)} mm -> ${fine.report.cellMm.toFixed(2)} mm cells`);
+  // Compare what was achieved, not what was asked: the cell budget may cap the
+  // detail, and that cap is correct behaviour rather than a failure.
+  check('finer cells really are finer',
+    fine.report.xySub > coarse.report.xySub
+    && Math.abs(fine.report.cellMm - DEFAULT_INPUT.moduleMm / fine.report.xySub) < 1e-9,
+    `${coarse.report.cellMm.toFixed(2)} mm -> ${fine.report.cellMm.toFixed(2)} mm cells ` +
+    `(${coarse.report.xySub}× -> ${fine.report.xySub}×)`);
   check('the code is untouched by it',
     Math.abs(fine.report.driftFraction - coarse.report.driftFraction) < 0.005,
     `${(coarse.report.driftFraction * 100).toFixed(1)}% vs ${(fine.report.driftFraction * 100).toFixed(1)}% drift`);
@@ -284,6 +289,47 @@ console.log('\n== the sculpture can take the whole code ==');
   })());
 }
 
+console.log('\n== self-supporting really means no support material ==');
+{
+  // Overhang is measured as material with nothing in the 3x3 beneath it --
+  // steeper than 45 degrees. "Nothing directly below" would be the wrong test:
+  // in a voxel model every sloped surface offsets by a cell per layer, so a
+  // perfectly printable slope would count as overhang at every step.
+  for (const id of ['cat', 'tree', 'rocket', 'mushroom']) {
+    const on = design({ model: getModel(id)!.sdf, selfSupport: true });
+    const off = design({ model: getModel(id)!.sdf, selfSupport: false });
+    check(`${id}: nothing overhangs when self-supporting`, on.report.overhangs === 0,
+      `${off.report.overhangs} overhangs without it, ${(on.report.shavedFraction * 100).toFixed(0)}% shaved`);
+    check(`${id}: and it is still one piece that scans`,
+      on.report.looseParts === 1 && on.verify.matches);
+  }
+  // Shaving cannot corrupt the code: removing material only ever leaves a
+  // module lighter, and the tile beneath already carries every dark module.
+  const a = design({ selfSupport: true });
+  const b = design({ selfSupport: false });
+  check('shaving leaves the code untouched',
+    Math.abs(a.report.driftFraction - b.report.driftFraction) < 1e-9 && a.verify.matches,
+    `${(a.report.driftFraction * 100).toFixed(1)}% both ways`);
+}
+
+console.log('\n== a build always terminates, whatever the settings ==');
+{
+  // Cells scale with the code's area times the sculpture's height, and detail
+  // cubes all three. Unbounded, the largest code at full detail took a minute
+  // and allocated hundreds of megabytes -- the UI simply waited forever.
+  const t0 = Date.now();
+  const heavy = buildDesign({
+    ...DEFAULT_INPUT, payload, model: getModel('castle')!.sdf,
+    version: 20, span: 1, xySub: 4, zSub: 4,
+  });
+  const ms = Date.now() - t0;
+  check('the largest settings still finish promptly', ms < 12000, `${ms} ms`);
+  check('detail gave way, not the size or the code', heavy.report.detailCapped
+    && heavy.report.moduleCount === heavy.qr.moduleCount,
+    `detail reduced to ${heavy.report.xySub}× on a ${heavy.report.moduleCount}-module code`);
+  check('and the result is still valid', heavy.verify.matches && heavy.report.looseParts === 1);
+}
+
 console.log('\n== the mesh is a closed, correctly-wound solid ==');
 {
   const signedVolume = (m: { positions: Float32Array; triangleCount: number }) => {
@@ -300,7 +346,7 @@ console.log('\n== the mesh is a closed, correctly-wound solid ==');
   for (const id of ['rocket', 'cat', 'castle']) {
     const qr = makeQr(payload, 'H', 4, 8);
     const carved = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, getModel(id)!.sdf,
-      { span: 0.55, zSub: 2, xySub: 2, tileLayers: 2 });
+      { span: 0.55, zSub: 2, xySub: 2, tileLayers: 2, selfSupport: true });
     const mm = 1.5, lm = 0.9;
     const mesh = meshSculpture(carved.grid, { moduleMm: mm, layerMm: lm, baseMm: 0, withBase: false });
     let solid = 0; for (const v of carved.grid.data) solid += v;

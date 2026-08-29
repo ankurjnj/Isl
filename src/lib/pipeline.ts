@@ -23,6 +23,8 @@ export interface DesignInput {
   xySub: number;
   /** Layers of raised code beneath the sculpture. */
   tileLayers: number;
+  /** Shave the sculpture back to what prints without support material. */
+  selfSupport: boolean;
   moduleMm: number;
   layerMm: number;
   baseMm: number;
@@ -44,6 +46,10 @@ export interface DesignReport {
   /** Sculpture cells per module across, and their size in mm. */
   xySub: number;
   cellMm: number;
+  /** True when detail was reduced to keep the build tractable. */
+  detailCapped: boolean;
+  /** Share of the sculpture shaved away to make it self-supporting. */
+  shavedFraction: number;
   /** True when the sculpture was cut back to keep the code readable. */
   spanClamped: boolean;
   /** Light modules darkened to join the sculpture. Each is one module of error. */
@@ -90,6 +96,8 @@ export const DEFAULT_INPUT: Omit<DesignInput, 'model' | 'payload'> = {
   // already raises every dark module, so a partly covered one still reads dark.
   xySub: 3,
   tileLayers: 2,
+  // On by default: the point of this thing is that it prints.
+  selfSupport: true,
   moduleMm: 2.6,
   layerMm: 0.6,
   baseMm: 1.6,
@@ -99,6 +107,24 @@ export const DEFAULT_INPUT: Omit<DesignInput, 'model' | 'payload'> = {
 export function buildDesign(input: DesignInput): Design {
   const qr = makeQr(input.payload, input.ecc, input.quietZone, input.version || undefined);
 
+  // Cap the grid before anything else touches it.
+  //
+  // Cells scale with the code's area times the sculpture's height, and detail
+  // cubes all three, so a large code at high detail is tens of millions of
+  // cells -- a minute of work, and a component-labelling pass that allocates
+  // four bytes each on top. Left unbounded the build simply never returns and
+  // the UI waits forever. Detail gives way rather than size or code version,
+  // because those two are what the user is actually choosing between.
+  const gridCells = (sub: number) => {
+    const across = (qr.moduleCount + input.quietZone * 2) * sub;
+    const tall = Math.max(4, Math.round(qr.moduleCount * input.span * 1.4 * sub)) + input.tileLayers;
+    return across * across * tall;
+  };
+  const CELL_BUDGET = 5e6;
+  let detail = Math.max(1, Math.round(input.xySub));
+  while (detail > 1 && gridCells(detail) > CELL_BUDGET) detail--;
+  const zSub = Math.max(1, Math.min(input.zSub, detail));
+
   // Fit the sculpture to the code's error budget.
   //
   // Bridges scale with the sculpture's area while the budget scales with the
@@ -107,25 +133,35 @@ export function buildDesign(input: DesignInput): Design {
   // dense footprint fragments into more pieces than a slender one. Rather than
   // capping the span by a rule that would be wrong for half the library, ask
   // for what was requested and step back only if the decoder actually objects.
-  const attempt = (span: number) => {
+  const attempt = (span: number, sub: number, zs: number) => {
     const carved = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, input.model, {
-      span, zSub: input.zSub, xySub: input.xySub, tileLayers: input.tileLayers,
+      span, zSub: zs, xySub: sub, tileLayers: input.tileLayers, selfSupport: input.selfSupport,
     });
     // The code a scanner reads is the one with the bridges in it, so that is
     // what gets verified -- not the pristine code we started from.
     return { carved, verify: verifyTopView(carved.code, input.payload) };
   };
 
-  let best = attempt(input.span);
-  if (!best.verify.matches) {
-    let lo = 0.2, hi = input.span;
-    for (let i = 0; i < 4 && !best.verify.matches; i++) {
+  // Search for the span at detail 1, then carve once at the detail asked for.
+  //
+  // Bridging works on the module grid, so whether a span decodes barely depends
+  // on how finely the sculpture is shaped within it -- but a full-detail carve
+  // costs an order of magnitude more. Searching at full detail meant four of
+  // them back to back, which is where the wait came from.
+  let span = input.span;
+  if (!attempt(span, 1, 1).verify.matches) {
+    let lo = 0.2, hi = span;
+    for (let i = 0; i < 4; i++) {
       const mid = (lo + hi) / 2;
-      const tryMid = attempt(mid);
-      if (tryMid.verify.matches) { best = tryMid; lo = mid; } else hi = mid;
+      if (attempt(mid, 1, 1).verify.matches) lo = mid; else hi = mid;
     }
-    if (!best.verify.matches) best = attempt(lo);
+    span = lo;
   }
+
+  let best = attempt(span, detail, zSub);
+  // The cheap search can be off by a little, so confirm at the real detail and
+  // give ground once if it was.
+  if (!best.verify.matches) best = attempt(span * 0.75, detail, zSub);
   const { carved, verify } = best;
 
   // The grid is finer than the code, so a cell is a fraction of a module.
@@ -152,6 +188,8 @@ export function buildDesign(input: DesignInput): Design {
     spanModules: carved.spanModules,
     xySub: carved.xySub,
     cellMm,
+    detailCapped: detail < Math.round(input.xySub),
+    shavedFraction: carved.shavedFraction,
     spanClamped: carved.spanModules < Math.round(qr.moduleCount * input.span),
     bridges: carved.bridges,
     driftFraction: drift / (qr.moduleCount * qr.moduleCount),
@@ -203,6 +241,12 @@ function collectWarnings(
       'floating well clear of anything beneath them, and they are being propped up to the tile.',
     );
   }
+  if (report.detailCapped) {
+    w.push(
+      `Detail was reduced to ${report.xySub}× per module to keep this size of code workable. ` +
+      'A smaller code or a smaller sculpture can carry more.',
+    );
+  }
   if (report.spanClamped) {
     w.push(
       `The sculpture was reduced to ${report.spanModules} modules — any wider and joining its fragments ` +
@@ -216,7 +260,16 @@ function collectWarnings(
     );
   }
   if (report.overhangs > 0) {
-    w.push(`${report.overhangs} overhanging voxels — print with supports, or accept some droop.`);
+    w.push(
+      `${report.overhangs} cells overhang steeper than 45° and will need support material. ` +
+      'Turning on Self-supporting shaves them away instead.',
+    );
+  }
+  if (report.shavedFraction > 0.15) {
+    w.push(
+      `Self-supporting removed ${(report.shavedFraction * 100).toFixed(0)}% of this shape — it flares out ` +
+      'well beyond what a printer can bridge. Turn it off to keep the full form and print with supports.',
+    );
   }
   if (input.baseMm < 0.8) w.push('The base plate is very thin and may warp or tear off the bed.');
   if (Math.max(dims.widthMm, dims.depthMm) > 250) {
@@ -237,8 +290,8 @@ export function printingNotes(input: Omit<DesignInput, 'model'>, design: DesignV
   return [
     `Insert a filament change at Z = ${input.baseMm.toFixed(2)} mm. Below it is the base plate — use a light colour. Above it is the code and the sculpture — use a dark, matte colour.`,
     design.report.overhangs === 0
-      ? 'No supports needed: nothing overhangs.'
-      : `Enable supports (${design.report.overhangs} overhanging voxels). They only touch the sculpture; the code tile needs none.`,
+      ? 'No supports needed: nothing overhangs steeper than 45°.'
+      : `Enable supports (${design.report.overhangs} cells steeper than 45°). They only touch the sculpture; the code tile needs none.`,
     `Modules are ${input.moduleMm} mm — ${design.print.modulePasses.toFixed(1)} passes of a ${input.nozzleMm} mm nozzle. Layers are ${input.layerMm} mm, so pick a layer height that divides it evenly.`,
     `${design.print.layers} layers, with ${design.print.isolatedModules} single-module islands on the plate — none of them load-bearing, since every one is fused to the base.`,
     `${design.dims.widthMm.toFixed(0)} × ${design.dims.depthMm.toFixed(0)} mm tile, ${design.dims.heightMm.toFixed(0)} mm tall, sculpture ${design.dims.figureMm.toFixed(0)} mm across.`,

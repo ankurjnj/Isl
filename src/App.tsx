@@ -45,6 +45,7 @@ export default function App() {
   const [layerMm, setLayerMm] = useState(DEFAULT_INPUT.layerMm);
   const [baseMm, setBaseMm] = useState(DEFAULT_INPUT.baseMm);
   const [nozzleMm, setNozzleMm] = useState(DEFAULT_INPUT.nozzleMm);
+  const [selfSupport, setSelfSupport] = useState(DEFAULT_INPUT.selfSupport);
   const [invert, setInvert] = useState(false);
   const [preset, setPreset] = useState<CameraPreset>('angle');
   const [showBase, setShowBase] = useState(true);
@@ -81,9 +82,9 @@ export default function App() {
       // One control drives both axes: shaping the sculpture finely across but
       // coarsely up its height reads as smeared, not detailed.
       ? { ...DEFAULT_INPUT, payload: payload.trim(), ecc, version, span, xySub: detail, zSub: detail,
-          moduleMm, layerMm, baseMm, nozzleMm }
+          moduleMm, layerMm, baseMm, nozzleMm, selfSupport }
       : null),
-    [payload, ecc, version, span, detail, moduleMm, layerMm, baseMm, nozzleMm],
+    [payload, ecc, version, span, detail, moduleMm, layerMm, baseMm, nozzleMm, selfSupport],
   );
   const settledInputs = useSettled(inputs);
   const settledSource = useSettled(source);
@@ -186,6 +187,20 @@ export default function App() {
           />
         </section>
 
+        <section>
+          <label className="check">
+            <input type="checkbox" checked={selfSupport} onChange={(e) => setSelfSupport(e.target.checked)} />
+            Self-supporting — no support material needed
+          </label>
+          <p className="hint">
+            {selfSupport
+              ? design && design.report.shavedFraction > 0.01
+                ? `Shaves back anything overhanging steeper than 45°, which costs this shape ${(design.report.shavedFraction * 100).toFixed(0)}% of its material. Turn off to keep the full form and print with supports.`
+                : 'Shaves back anything overhanging steeper than 45°. This shape barely notices.'
+              : `The full shape, overhangs and all — ${design?.report.overhangs ?? 0} cells will need support material.`}
+          </p>
+        </section>
+
         <section className="grid2">
           <Field label={`Sculpture size — ${design ? `${design.report.spanModules} of ${design.report.moduleCount} modules` : `${(span * 100).toFixed(0)}%`}`}>
             <input className="range" type="range" min={0.2} max={1} step={0.01} value={span} onChange={(e) => setSpan(+e.target.value)} />
@@ -252,6 +267,7 @@ export default function App() {
                 <Stat k="Bridges" v={`${design.report.bridges}`} />
                 <Stat k="Supports" v={`${design.report.supports}`} />
                 <Stat k="Pieces" v={`${design.report.looseParts}`} />
+                <Stat k="Overhangs" v={design.report.overhangs === 0 ? 'none' : `${design.report.overhangs}`} />
                 <Stat k="Triangles" v={`${design.report.triangles.toLocaleString()}`} />
               </dl>
 
