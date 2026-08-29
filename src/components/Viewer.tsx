@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { Design } from '../lib/pipeline';
+import type { DesignView } from '../lib/pipeline';
 
 export type CameraPreset = 'top' | 'side' | 'angle';
 
@@ -24,7 +24,7 @@ const PRESETS: Record<CameraPreset, [number, number, number]> = {
 };
 
 interface Props {
-  design: Design | null;
+  design: DesignView | null;
   preset: CameraPreset;
   showBase: boolean;
 }

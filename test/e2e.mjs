@@ -29,13 +29,15 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
 page.on('console', (m) => m.type() === 'error' && !m.text().includes('404') && errors.push(m.text()));
 
-await page.goto(URL_, { waitUntil: 'networkidle' });
+await page.goto(URL_, { waitUntil: 'load' });
 await page.waitForTimeout(1500);
 
 const PAYLOAD = 'https://example.com/scan-me-from-above';
 await page.fill('#payload', PAYLOAD);
 await page.fill('#prompt', 'a rocket');
-await page.waitForTimeout(900);
+await page.waitForFunction(() =>
+  ![...document.querySelectorAll('.hint')].some((h) => h.textContent.includes('Rebuilding')),
+  null, { timeout: 30000 });
 
 check('app reports the model scans', await page.locator('.verdict.ok').isVisible());
 
@@ -153,6 +155,60 @@ await page.waitForTimeout(900);
 const gotCorners = await finders('.viewer canvas');
 check('intended code has finders at TL, TR, BL only', wantCorners === '1110', `TL TR BL BR = ${wantCorners}`);
 check('printed model is not mirrored', gotCorners === wantCorners, `geometry ${gotCorners} vs intended ${wantCorners}`);
+
+// Responsiveness. A build is voxelisation plus a QR decode -- seconds of
+// synchronous work -- so it runs in a worker. The test is a controlled
+// comparison: measure the worst gap between animation frames while idle, then
+// again during a build. An absolute threshold would measure this environment's
+// software WebGL renderer (a uniform ~180 ms per frame at 2x scale) rather than
+// anything about the app. The build blocking the thread would show up as the
+// during-build figure dwarfing the idle one.
+await page.getByRole('button', { name: '3D model', exact: true }).click();
+await page.waitForTimeout(500);
+
+const worstFrameGap = (ms) => page.evaluate((ms) => new Promise((res) => {
+  const start = performance.now();
+  let last = start, worst = 0;
+  const tick = () => {
+    const now = performance.now();
+    worst = Math.max(worst, now - last);
+    last = now;
+    if (now - start >= ms) res(worst); else requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}), ms);
+
+const idle = await worstFrameGap(1200);
+
+const during = await page.evaluate(async () => {
+  const el = document.querySelector('input[type=range]');
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  const t0 = performance.now();
+  for (const v of [0.3, 0.35, 0.4, 0.45, 0.5, 0.55]) {
+    setValue.call(el, String(v));
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  const dispatched = performance.now() - t0;
+  return new Promise((res) => {
+    const start = performance.now();
+    let last = start, worst = 0;
+    const tick = () => {
+      const now = performance.now();
+      worst = Math.max(worst, now - last);
+      last = now;
+      const busy = [...document.querySelectorAll('.hint')].some((h) => h.textContent.includes('Rebuilding'));
+      if (!busy || now - start > 20000) res({ dispatched, settled: now - start, worst });
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+});
+
+check('rapid input is accepted without stalling', during.dispatched < 200,
+  `six changes in ${during.dispatched.toFixed(0)} ms`);
+check('building does not stall the page beyond idle rendering', during.worst < idle * 2 + 200,
+  `worst frame ${during.worst.toFixed(0)} ms building vs ${idle.toFixed(0)} ms idle (settled in ${during.settled.toFixed(0)} ms)`);
+check('and it settles to a valid design', await page.locator('.verdict.ok').isVisible());
 
 check('no page errors', errors.length === 0, errors.join(' | '));
 

@@ -4,12 +4,28 @@ import Projection from './components/Projection';
 import ModelThumb from './components/ModelThumb';
 import { Bitmap } from './lib/bitmap';
 import { project } from './lib/voxel';
-import { Sdf } from './lib/sdf';
-import { extrudeSilhouette, revolveSilhouette } from './lib/voxelize';
 import { MODELS, getModel, matchModel } from './lib/models3d';
-import { DEFAULT_INPUT, buildDesign, exportObj, exportStl, printingNotes, type Design, type DesignInput } from './lib/pipeline';
+import { DEFAULT_INPUT, exportObj, exportStl, printingNotes, type DesignInput } from './lib/pipeline';
+import { useDesign, type WorkerDesign } from './useDesign';
+import type { ModelSource } from './lib/source';
 import { downloadBlob, imageFileToBitmap, slugify, textToBitmap } from './lib/browser';
 import type { EccLevel } from './lib/qr';
+
+/**
+ * Hold a value still until edits stop.
+ *
+ * Building a design is hundreds of milliseconds of voxelisation and a QR
+ * decode, run synchronously. Without this, dragging a slider queues one of
+ * those per frame and the control itself stops responding.
+ */
+function useSettled<T>(value: T, delay = 220): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setSettled(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return settled;
+}
 
 type ArtSource =
   | { kind: 'library'; id: string }
@@ -43,39 +59,36 @@ export default function App() {
     else if (prompt.trim()) setArt({ kind: 'text', text: prompt.trim().split(/\s+/)[0].toUpperCase() });
   }, [suggestion, prompt, pinned]);
 
-  const model = useMemo<Sdf | null>(() => {
+  // What to sculpt, as a serialisable description rather than a closure, so the
+  // whole build can be handed to a worker.
+  const source = useMemo<ModelSource | null>(() => {
     try {
-      if (art.kind === 'library') return getModel(art.id)?.sdf ?? null;
-      // Only lettering is extruded, because extruded lettering is what 3D text
-      // actually is. An uploaded outline becomes a lathe: a real solid rather
-      // than a slab.
-      if (art.kind === 'text') return extrudeSilhouette(textToBitmap(art.text));
-      return revolveSilhouette(art.bitmap);
+      if (art.kind === 'library') return { kind: 'library', id: art.id };
+      if (art.kind === 'text') return { kind: 'text', bitmap: textToBitmap(art.text) };
+      return { kind: 'lathe', bitmap: art.bitmap };
     } catch {
       return null;
     }
   }, [art]);
 
-  const design = useMemo<Design | null>(() => {
-    if (!model || !payload.trim()) return null;
-    const input: DesignInput = {
-      ...DEFAULT_INPUT,
-      payload: payload.trim(),
-      ecc, version, span, subdiv, moduleMm, layerMm, baseMm,
-      model,
-    };
-    try {
-      setError(null);
-      return buildDesign(input);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      return null;
-    }
-  }, [model, payload, ecc, version, span, subdiv, moduleMm, layerMm, baseMm]);
+  // Everything the build depends on, as one value that only changes when one of
+  // its parts does. Memoising here is load-bearing, not tidiness: a fresh object
+  // literal would differ on every render, so the debounce below would re-arm
+  // itself forever and rebuild the design on a timer with no input at all.
+  const inputs = useMemo<Omit<DesignInput, 'model'> | null>(
+    () => (payload.trim()
+      ? { ...DEFAULT_INPUT, payload: payload.trim(), ecc, version, span, subdiv, moduleMm, layerMm, baseMm }
+      : null),
+    [payload, ecc, version, span, subdiv, moduleMm, layerMm, baseMm],
+  );
+  const settledInputs = useSettled(inputs);
+  const settledSource = useSettled(source);
+  const { design, error: buildError, pending: building } = useDesign(settledInputs, settledSource);
+  const pending = building || settledInputs !== inputs || settledSource !== source;
 
   const notes = useMemo(
-    () => (design ? printingNotes({ ...DEFAULT_INPUT, payload, ecc, version, span, subdiv, moduleMm, layerMm, baseMm, model: model! }, design) : []),
-    [design, payload, ecc, version, span, subdiv, moduleMm, layerMm, baseMm, model],
+    () => (design && settledInputs ? printingNotes(settledInputs, design) : []),
+    [design, settledInputs],
   );
 
   const onUpload = async (file: File) => {
@@ -170,10 +183,10 @@ export default function App() {
         </section>
 
         <section className="grid2">
-          <Field label={`Sculpture size — ${(span * 100).toFixed(0)}%`}>
+          <Field label={`Sculpture size — ${design ? `${design.report.spanModules} of ${design.qr.moduleCount} modules` : `${(span * 100).toFixed(0)}%`}`}>
             <input className="range" type="range" min={0.15} max={0.7} step={0.01} value={span} onChange={(e) => setSpan(+e.target.value)} />
           </Field>
-          <Field label={`Detail — ${subdiv}× per module`}>
+          <Field label={`Detail — ${design?.report.usedSubdiv ?? subdiv}× per module`}>
             <input className="range" type="range" min={1} max={8} step={1} value={subdiv} onChange={(e) => setSubdiv(+e.target.value)} />
           </Field>
         </section>
@@ -201,7 +214,8 @@ export default function App() {
           </Field>
         </section>
 
-        {error && <div className="alert bad">{error}</div>}
+        {(error ?? buildError) && <div className="alert bad">{error ?? buildError}</div>}
+        {pending && !error && !buildError && <div className="hint">Rebuilding…</div>}
 
         {design && (
           <>
@@ -305,7 +319,7 @@ export default function App() {
   );
 }
 
-function figureSide(design: Design) {
+function figureSide(design: WorkerDesign) {
   return project(design.figure).sideAchieved;
 }
 

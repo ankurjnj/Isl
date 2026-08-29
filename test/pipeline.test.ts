@@ -4,6 +4,8 @@ import { buildFigure, buildTile, countComponents, occludedCode, probeMaxSpan, pr
 import { buildDesign, DEFAULT_INPUT, exportStl } from '../src/lib/pipeline';
 import { concatMeshes, meshSculpture } from '../src/lib/mesh';
 import { verifyTopView } from '../src/lib/verify';
+import { makeBitmap } from '../src/lib/bitmap';
+import { extrudeSilhouette, revolveSilhouette } from '../src/lib/voxelize';
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = '') {
@@ -43,8 +45,15 @@ console.log('\n== the sculpture is free of the module grid ==');
   // its resolution is set by the printer, not by the size of a QR module.
   const coarse = design({ subdiv: 1 });
   const fine = design({ subdiv: 6 });
-  check('detail scales independently of the code', fine.report.figureVoxels > coarse.report.figureVoxels * 5,
-    `${coarse.report.figureVoxels}³ -> ${fine.report.figureVoxels}³ voxels`);
+  // Resolution tracks the requested detail (up to the voxel budget), never the
+  // module pitch -- which is the whole point of standing the figure on the code.
+  check('detail scales with what was asked, not the module pitch',
+    fine.report.usedSubdiv > coarse.report.usedSubdiv
+    && fine.report.figureVoxels === fine.report.spanModules * fine.report.usedSubdiv,
+    `${coarse.report.usedSubdiv}× -> ${fine.report.usedSubdiv}× per module ` +
+    `(${coarse.report.figureVoxels}³ -> ${fine.report.figureVoxels}³ voxels)`);
+  check('a voxel is finer than a module', fine.report.figureVoxelMm < DEFAULT_INPUT.moduleMm,
+    `${fine.report.figureVoxelMm.toFixed(2)} mm vs ${DEFAULT_INPUT.moduleMm} mm module`);
   check('the code is unchanged by it', coarse.qr.moduleCount === fine.qr.moduleCount);
   check('both still decode', coarse.verify.matches && fine.verify.matches);
 }
@@ -66,6 +75,66 @@ console.log('\n== the sculpture keeps undercuts a carved one could not ==');
   }
   check('the mushroom cap genuinely overhangs its stalk', undercut > 200, `${undercut} overhanging voxels`);
   check('and it is still one piece', countComponents(g) === 1);
+}
+
+console.log('\n== the sculpture is fitted to its real footprint, not its bounding box ==');
+{
+  // The square probe assumes the sculpture blocks every module in its bounding
+  // box. Slender subjects do not, so fitting against the actual silhouette
+  // should beat that bound -- while blocky ones correctly fall back to it.
+  const qr = makeQr(payload, 'H', 4, DEFAULT_INPUT.version);
+  const square = probeMaxSpan(qr.bitmap, qr.quietZone, qr.moduleCount, payload);
+  const big = (id: string) => buildDesign({ ...DEFAULT_INPUT, payload, model: getModel(id)!.sdf, span: 0.9 });
+
+  const rocket = big('rocket');
+  check('a slender subject beats the square bound', rocket.report.spanModules > square,
+    `${rocket.report.spanModules} vs ${square} modules`);
+  check('and it still decodes', rocket.verify.matches);
+
+  const blocky = big('house');
+  check('a blocky subject falls back to it', blocky.report.spanModules <= square,
+    `${blocky.report.spanModules} vs ${square} modules`);
+  check('and it decodes too', blocky.verify.matches);
+
+  const small = buildDesign({ ...DEFAULT_INPUT, payload, model: getModel('cat')!.sdf, span: 0.2 });
+  check('a smaller request is honoured, not inflated', small.report.spanModules < square,
+    `asked 20%, got ${small.report.spanModules} modules`);
+}
+
+console.log('\n== detail is capped so a large sculpture stays workable ==');
+{
+  // Voxel count grows with the cube of span x subdiv. Past the budget the
+  // detail gives way, never the size the user asked for.
+  const d = buildDesign({ ...DEFAULT_INPUT, payload, model: getModel('rocket')!.sdf, span: 0.9, subdiv: 8 });
+  check('detail is reduced rather than the size', d.report.usedSubdiv < 8 && d.report.figureVoxels <= 120,
+    `${d.report.usedSubdiv}× per module, ${d.report.figureVoxels}³ voxels`);
+  check('and the model still holds together', d.report.looseParts === 1 && d.verify.matches);
+}
+
+console.log('\n== 2D input becomes a printable solid ==');
+{
+  // Both adapters can produce disconnected solids from innocuous input: a word
+  // is separate letters, and an outline with a gap revolves into parts that
+  // float. Pruning would then silently delete all but one.
+  const two = makeBitmap(64, 64);
+  for (let y = 16; y < 48; y++) {
+    for (let x = 8; x < 24; x++) two.data[y * 64 + x] = 1;
+    for (let x = 40; x < 56; x++) two.data[y * 64 + x] = 1;
+  }
+  const lettering = buildFigure(extrudeSilhouette(two), 24, 3, 1);
+  check('two glyphs stay one piece on their plinth',
+    countComponents(lettering) === 1 && (lettering.islandFraction ?? 0) < 0.01,
+    `${((lettering.islandFraction ?? 0) * 100).toFixed(0)}% dropped`);
+
+  const gapped = makeBitmap(64, 64);
+  for (let y = 0; y < 64; y++) {
+    if (y > 28 && y < 34) continue;
+    for (let x = 22; x < 42; x++) gapped.data[y * 64 + x] = 1;
+  }
+  const lathe = buildFigure(revolveSilhouette(gapped), 24, 3, 1);
+  check('a gapped outline is held by its spine',
+    countComponents(lathe) === 1 && (lathe.islandFraction ?? 0) < 0.01,
+    `${((lathe.islandFraction ?? 0) * 100).toFixed(0)}% dropped`);
 }
 
 console.log('\n== occlusion is capped at what the decoder tolerates ==');

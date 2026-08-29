@@ -47,11 +47,17 @@ That single change removes every constraint from the sculpture at once:
   hold, not by the size of a QR module. At the default it is ~80 voxels across
   at 0.5 mm each.
 
-The allowance is measured, not assumed: `probeMaxSpan` binary-walks the real
-decoder against the actual code, because the headroom depends on the version,
-the mask pattern and which blocks a given region spans — not just the ECC
-level's nominal rate. The app clamps the sculpture to that measured limit rather
-than shipping something that does not scan.
+The allowance is measured, not assumed: `probeMaxSpan` walks the real decoder
+against the actual code, because the headroom depends on the version, the mask
+pattern and which blocks a given region spans — not just the ECC level's
+nominal rate.
+
+That probe assumes the worst case, though: a sculpture blocking *every* module
+in its bounding box. Real ones do not — a rocket or a seated cat covers well
+under half of its own square — so the size is fitted against the sculpture's
+actual footprint, falling back toward the square bound only if the decoder
+really does object. That is worth up to **1.9×** the linear size for slender
+subjects, while blocky ones correctly settle at the conservative bound.
 
 ### The models
 
@@ -72,6 +78,27 @@ cost. And because that tolerance can strand a speck a voxel or two across near
 the rim of a subtracted cavity, only the largest connected body is kept, with
 the discarded fraction reported so a genuine modelling error (a limb that fails
 to meet the body) is surfaced rather than quietly deleted.
+
+### Staying responsive
+
+A build is voxelisation plus a QR decode — a second or more of synchronous work,
+and up to three attempts when the size is being fitted. Two things keep the page
+usable:
+
+- **Edits are debounced**, so dragging a slider coalesces into one build rather
+  than one per frame.
+- **Builds run in a worker**, inlined into the bundle (`?worker&inline`) because
+  the app also ships as one self-contained HTML file, where a separate worker
+  chunk would have nothing to load from. Only the newest request is kept, so a
+  slow build started before the last edit cannot overwrite a newer result.
+
+Model closures cannot cross a worker boundary, so the build's input names the
+*source* — a library id, or the bitmap behind a lathe or a word — rather than
+carrying the function itself.
+
+Voxel count grows with the cube of size × detail, so past a budget the **detail**
+gives way rather than the size: the size is what was asked for, the detail is a
+preference.
 
 ### Printability
 
@@ -120,6 +147,20 @@ short of the body.
 resolution must change its voxel count without touching the code's module
 count — that separation is the entire point of standing the figure on the tile
 rather than carving it from it.
+
+**Responsiveness is a controlled comparison, not a threshold.** The suite
+measures the worst gap between animation frames while idle, then again during a
+build, and asserts the second is not far above the first. An absolute number
+would measure the test environment's software WebGL renderer — a uniform ~200 ms
+per frame at 2× scale — rather than anything about the app. This distinction
+mattered: an earlier version of the check timed Playwright's own `fill` calls,
+which wait for the page to be actionable and so blocked on each build, reporting
+a 10-second stall that was entirely the test's own doing.
+
+**2D input has to become a printable solid.** A word is separate letters and an
+uploaded outline may have a gap in it; both voxelise into disconnected pieces,
+which pruning would then silently reduce to a single surviving letter. The
+suite asserts both come out whole — lettering on a plinth, a lathe on a spine.
 
 **A triangle count says nothing about whether a mesh is printable.** The mesh
 is checked by signed volume via the divergence theorem, which for a closed
