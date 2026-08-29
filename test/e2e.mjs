@@ -109,7 +109,19 @@ check('model is not cropped by the frame', coverage.minX > 2 && coverage.minY > 
 // top-left, top-right and bottom-left, and never at bottom-right. This compares
 // the rendered 3D geometry seen from above against the intended code, which is
 // the one place a mirror would show up.
-const finders = async (sel) => page.evaluate((sel) => {
+// Sample the finder centres, derived from the code's real geometry rather than
+// fixed percentages: a finder's centre sits 3.5 modules in from the code's
+// edge, and the code sits `quietZone` modules inside the bitmap. Hard-coded
+// fractions only happen to land on the finders at one particular module count.
+const codeStat = await page.locator('.stat').filter({ hasText: 'Code' }).locator('dd').innerText();
+const moduleCount = Number(/(\d+)²/.exec(codeStat)?.[1]);
+const QUIET = 4;
+const near = (QUIET + 3.5) / (moduleCount + QUIET * 2);
+const far = 1 - near;
+check('read the code geometry from the app', Number.isFinite(moduleCount) && moduleCount > 20,
+  `${moduleCount} modules, finders at ${(near * 100).toFixed(1)}% / ${(far * 100).toFixed(1)}%`);
+
+const finders = async (sel) => page.evaluate(({ sel, near, far }) => {
   const c = document.querySelector(sel);
   const o = document.createElement('canvas');
   o.width = c.width; o.height = c.height;
@@ -129,8 +141,8 @@ const finders = async (sel) => page.evaluate((sel) => {
     const i = ((Math.round(y0 + h * fy)) * width + Math.round(x0 + w * fx)) * 4;
     return data[i] < 110 ? 1 : 0;
   };
-  return [at(0.16, 0.16), at(0.84, 0.16), at(0.16, 0.84), at(0.84, 0.84)].join('');
-}, sel);
+  return [at(near, near), at(far, near), at(near, far), at(far, far)].join('');
+}, { sel, near, far });
 
 await page.getByRole('button', { name: 'Top view', exact: true }).click();
 await page.waitForTimeout(500);

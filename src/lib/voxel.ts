@@ -1,26 +1,31 @@
-import { Bitmap, columnNonEmpty, countSet, flipY, makeBitmap } from './bitmap';
+import { Bitmap, flipY, makeBitmap } from './bitmap';
+import { verifyTopView } from './verify';
 import { Sdf } from './sdf';
 
 /**
  * Axis convention, fixed everywhere in this file:
  *
- *   x  QR column  (left -> right when looking down at the top view)
- *   y  QR row     (back -> front; the depth axis of the printed object)
- *   z  height     (0 = the layer sitting on the base plate)
+ *   x  code column  (left -> right when looking down at the top view)
+ *   y  code row     (back -> front; the depth axis of the printed object)
+ *   z  height       (0 = the layer sitting on the base plate)
  *
- * The governing constraint, from which nearly every design decision here
- * follows:
+ * The print is two separate solids sharing one base plate:
  *
- *   Anything above the code plane occludes the code. Material may therefore
- *   only ever stand over a dark module, at ANY height. So two parts of the
- *   sculpture can touch only where their modules are face-adjacent in the code
- *   -- no horizontal bridging is possible anywhere, ever.
+ *   - the TILE, at module resolution, which is the code and must stay exactly
+ *     readable;
+ *   - the FIGURE, at a finer pitch, which is a real sculpture and carries no
+ *     constraints at all.
  *
- * A QR always contains isolated modules, so a shape with a part that floats
- * above a narrower part below it (a canopy over a trunk, a cap over a stalk)
- * cannot be a single printable object. The only honest resolutions are to hold
- * it with rods, or to give every column its own path to the ground. This build
- * takes the second: see `groundColumns`.
+ * That split is the whole design. Carving the sculpture out of the code, which
+ * is the obvious approach, cannot work: anything above the code plane occludes
+ * it, so material may only stand over dark modules at any height, and two parts
+ * of such a sculpture can touch only where their modules are face-adjacent.
+ * Measured on real codes that leaves 86 to 362 disconnected pieces, so the
+ * shape has to be flattened into a grounded relief to print at all -- which is
+ * what destroys its detail.
+ *
+ * Letting the sculpture simply stand on the code instead costs only error
+ * correction, and a QR has that to spare.
  */
 
 export interface VoxelGrid {
@@ -29,52 +34,8 @@ export interface VoxelGrid {
   h: number;
   /** 1 = solid. Index with `idx()`. */
   data: Uint8Array;
-}
-
-export type Support = 'grounded' | 'solid';
-
-export interface BuildOptions {
-  /**
-   * `grounded` gives every column a path to the base plate: one piece, no
-   * supports, no connecting rods. `solid` keeps the model's true occupancy,
-   * accepting overhangs -- and reporting honestly when that leaves pieces that
-   * would fall off.
-   */
-  support?: Support;
-  /** Height of the voxel grid, in layers. */
-  height?: number;
-  /** Height of the pedestal that completes the code, in layers. */
-  plinth?: number;
-}
-
-export interface BuildResult {
-  grid: VoxelGrid;
-  topAchieved: Bitmap;
-  sideAchieved: Bitmap;
-  /** The solid's own side outline, before the code masked it. */
-  sideRequested: Bitmap;
-  report: BuildReport;
-}
-
-export interface BuildReport {
-  support: Support;
-  /** Fraction of the code that survives into the top view. 1 = exact. */
-  topFidelity: number;
-  /** Fraction of the solid's outline that survives the code masking. */
-  sideFidelity: number;
-  /**
-   * How much grounding moved the solid's outline. 0 means the subject tapers
-   * and is reproduced exactly; a large value means it re-widens above a narrow
-   * point and has lost the feature that made it recognisable.
-   */
-  outlineDistortion: number;
-  /** x columns where the code is entirely light, so nothing may stand there. */
-  blindColumns: number[];
-  solidVoxels: number;
-  /** Voxels with nothing beneath them. Zero means it prints without supports. */
-  overhangs: number;
-  /** Disconnected pieces. Anything above 1 will fall apart. */
-  looseParts: number;
+  /** Share of the voxelised model discarded as disconnected specks. */
+  islandFraction?: number;
 }
 
 export function idx(g: VoxelGrid, x: number, y: number, z: number): number {
@@ -87,54 +48,23 @@ export function getVoxel(g: VoxelGrid, x: number, y: number, z: number): number 
 }
 
 /**
- * Give every column a path to the ground by filling it from the base up to the
- * solid's top surface at that (x, y).
+ * The scannable tile: the code's dark modules, raised on the base plate.
  *
- * This is what removes the connecting rods, and it is not a cosmetic choice:
- * per the note at the top of this file, a column that does not reach the ground
- * on its own cannot be joined to anything sideways, so its only alternatives
- * are a rod or falling off. Filling downward costs the subject any feature that
- * re-widens above a narrow point -- which is precisely why the model library is
- * authored to taper. `outlineDistortion` measures what a given subject loses.
+ * The tile carries the whole burden of being readable, which frees the
+ * sculpture entirely -- see `buildFigure`.
  */
-function groundColumns(g: VoxelGrid): VoxelGrid {
-  const out: VoxelGrid = { ...g, data: new Uint8Array(g.data) };
-  for (let y = 0; y < g.d; y++) {
-    for (let x = 0; x < g.w; x++) {
-      let top = -1;
-      for (let z = g.h - 1; z >= 0; z--) {
-        if (g.data[idx(g, x, y, z)]) { top = z; break; }
-      }
-      for (let z = 0; z <= top; z++) out.data[idx(g, x, y, z)] = 1;
-    }
-  }
-  return out;
-}
-
-/**
- * Sample a solid into the grid.
- *
- * Model space is x, y in [-0.5, 0.5] and z in [0, 1], mapped onto the code's
- * data area and the layers above the plinth. The artwork stays inside the data
- * area because anything in the quiet zone would be multiplied by a light module
- * and vanish.
- */
-function voxelizeModel(
-  sdf: Sdf,
-  w: number, d: number, h: number,
-  quietZone: number, plinth: number,
-): VoxelGrid {
+export function buildTile(qr: Bitmap, layers: number): VoxelGrid {
+  const w = qr.w, d = qr.h, h = Math.max(1, layers);
+  // Image space (row 0 at the top of the picture) to physical space, where an
+  // observer looking down with +x to their right sees +y going up their view.
+  // Without this flip the print is a vertical mirror of the code, and a
+  // mirrored QR is not a rotated one -- turning the print cannot fix it.
+  const phys = flipY(qr);
   const g: VoxelGrid = { w, d, h, data: new Uint8Array(w * d * h) };
-  const dataW = w - quietZone * 2;
-  const dataD = d - quietZone * 2;
-  const artH = Math.max(1, h - plinth);
-  for (let z = 0; z < artH; z++) {
-    const mz = (z + 0.5) / artH;
-    for (let y = 0; y < dataD; y++) {
-      const my = (y + 0.5) / dataD - 0.5;
-      for (let x = 0; x < dataW; x++) {
-        const mx = (x + 0.5) / dataW - 0.5;
-        if (sdf(mx, my, mz) < 0) g.data[idx(g, x + quietZone, y + quietZone, z + plinth)] = 1;
+  for (let z = 0; z < h; z++) {
+    for (let y = 0; y < d; y++) {
+      for (let x = 0; x < w; x++) {
+        if (phys.data[y * w + x]) g.data[idx(g, x, y, z)] = 1;
       }
     }
   }
@@ -142,115 +72,222 @@ function voxelizeModel(
 }
 
 /**
- * Build the sculpture: a real 3D solid, masked by the code.
+ * The sculpture, voxelised free-standing.
  *
- *     V(x, y, z) = QR(x, y) AND M(x, y, z)
+ * This is the part that carries no constraints at all. It is not masked by the
+ * code, so nothing shreds its detail; it is not grounded, so it keeps its
+ * undercuts; and its grid is finer than the module pitch, so its resolution is
+ * set by what the printer can hold rather than by the size of a QR module.
  *
- * Because M is a genuine solid rather than a swept outline, its occupancy
- * varies along every axis, and so does the result.
+ * All of that is bought by the code's error correction. The sculpture simply
+ * stands on the tile and hides part of it, and a QR at ECC Q or H reads through
+ * roughly a fifth of its area being covered -- the same allowance that lets a
+ * logo sit in the middle of a printed code. `probeMaxSpan` measures the real
+ * limit for a given payload rather than trusting that figure.
  *
- * Projecting back gives:
- *
- *     top(x, y)  = QR(x, y) AND (the solid stands somewhere in that column)
- *     side(x, z) = M's outline AND (that code column carries ink somewhere)
- *
- * The top view is what must never be approximate, and the plinth guarantees it:
- * a pedestal spanning every data column means each dark module carries material
- * regardless of where the sculpture happens to stand. The side view needs no
- * such device -- it only needs one dark module anywhere across the depth, and
- * with tens of columns to draw from it survives essentially intact.
+ * Model space is x, y in [-0.5, 0.5] and z in [0, 1], z = 0 the ground.
  */
-export function buildSculpture(
-  qr: Bitmap,
-  model: Sdf,
-  quietZone: number,
-  opts: BuildOptions = {},
-): BuildResult {
-  const support = opts.support ?? 'grounded';
-  const h = Math.max(6, Math.round(opts.height ?? Math.round(qr.w * 0.9)));
-  const plinth = Math.max(1, Math.round(opts.plinth ?? Math.max(2, Math.round(h * 0.06))));
+export function buildFigure(
+  sdf: Sdf,
+  spanModules: number,
+  subdiv: number,
+  heightScale = 1,
+): VoxelGrid {
+  const n = Math.max(4, Math.round(spanModules * subdiv));
 
-  const w = qr.w;
-  const d = qr.h;
-  if (w - quietZone * 2 <= 0) throw new Error('quiet zone larger than the code');
-
-  const raw = voxelizeModel(model, w, d, h, quietZone, plinth);
-  const shaped = support === 'grounded' ? groundColumns(raw) : raw;
-
-  // The pedestal. Solid across every data column, which is what makes the top
-  // view exact no matter where the sculpture stands.
-  for (let z = 0; z < plinth; z++) {
-    for (let y = quietZone; y < d - quietZone; y++) {
-      for (let x = quietZone; x < w - quietZone; x++) shaped.data[idx(shaped, x, y, z)] = 1;
-    }
+  // Normalise the model into its footprint using the bounds the primitives
+  // carry. Authored coordinates are convenient, not calibrated -- a tree whose
+  // canopy happens to have radius 0.26 would otherwise occupy half the space a
+  // 0.5 model does, and read as small for no reason the author intended. This
+  // makes every model fill the footprint it is given, and derives its height
+  // from its own proportions rather than a guess.
+  const b = sdf.bounds;
+  let scale = 1, z0 = 0, aspect = heightScale;
+  if (b && Number.isFinite(b[0]) && b[3] > b[0]) {
+    const radial = Math.max(Math.abs(b[0]), Math.abs(b[3]), Math.abs(b[1]), Math.abs(b[4]));
+    if (radial > 0) scale = 0.5 / radial;
+    z0 = b[2];
+    aspect = Math.max(0.2, (b[5] - b[2]) * scale) * heightScale;
   }
+  const h = Math.max(4, Math.round(n * aspect));
 
-  // The QR bitmap is image space, row 0 at the top of the picture; the grid is
-  // physical space, where an observer looking down with +x to their right sees
-  // +y going up their view. Laying row 0 at y = 0 would print a vertical mirror
-  // of the code, and a mirrored QR is not a rotated one -- turning the print
-  // cannot fix it. Flip once here, and flip the projections back to report them.
-  const qrPhysical = flipY(qr);
-  const grid: VoxelGrid = { w, d, h, data: new Uint8Array(w * d * h) };
+  const g: VoxelGrid = { w: n, d: n, h, data: new Uint8Array(n * n * h) };
+  // One sample per voxel, accepted slightly outside the surface. A strict
+  // centre test drops any feature thinner than the pitch -- a fin, an ear, a
+  // railing post -- while supersampling to catch them costs eight evaluations
+  // per voxel, which on a model built from dozens of primitives is seconds of
+  // work. Half a voxel of tolerance rescues the same thin features for one.
+  const tol = 0.45 / (n * scale);
   for (let z = 0; z < h; z++) {
-    for (let y = 0; y < d; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = idx(grid, x, y, z);
-        if (shaped.data[i] && qrPhysical.data[y * w + x]) grid.data[i] = 1;
+    const mz = z0 + ((z + 0.5) / h) * (aspect / scale);
+    for (let y = 0; y < n; y++) {
+      const my = ((y + 0.5) / n - 0.5) / scale;
+      for (let x = 0; x < n; x++) {
+        if (sdf(((x + 0.5) / n - 0.5) / scale, my, mz) < tol) g.data[idx(g, x, y, z)] = 1;
       }
     }
   }
-
-  const trimmed = trimHeight(grid);
-  const projected = project(trimmed);
-  const topAchieved = flipY(projected.topAchieved);
-  const sideAchieved = projected.sideAchieved;
-
-  // What the solid alone would show from the side, and what grounding cost it.
-  const sideRequested = sideOf(shaped, trimmed.h);
-  const sideBeforeGrounding = sideOf(raw, trimmed.h);
-  let outlineWant = 0, outlineAdded = 0;
-  for (let i = 0; i < sideRequested.data.length; i++) {
-    outlineWant += sideBeforeGrounding.data[i];
-    if (sideRequested.data[i] && !sideBeforeGrounding.data[i]) outlineAdded++;
-  }
-
-  const qrCols = columnNonEmpty(qr);
-  const blindColumns: number[] = [];
-  for (let x = quietZone; x < w - quietZone; x++) if (!qrCols[x]) blindColumns.push(x);
-
-  const wantTop = countSet(qr);
-  const wantSide = countSet(sideRequested);
-  const report: BuildReport = {
-    support,
-    topFidelity: wantTop ? countSet(intersect(topAchieved, qr)) / wantTop : 1,
-    sideFidelity: wantSide ? countSet(intersect(sideAchieved, sideRequested)) / wantSide : 1,
-    outlineDistortion: outlineWant ? outlineAdded / outlineWant : 0,
-    blindColumns,
-    solidVoxels: trimmed.data.reduce((a, b) => a + b, 0),
-    overhangs: countOverhangs(trimmed),
-    looseParts: countComponents(trimmed),
-  };
-
-  return { grid: trimmed, topAchieved, sideAchieved, sideRequested, report };
+  return pruneIslands(g);
 }
 
-function sideOf(g: VoxelGrid, h: number): Bitmap {
-  const b = makeBitmap(g.w, h);
-  for (let z = 0; z < Math.min(h, g.h); z++) {
+/**
+ * Keep only the largest connected body.
+ *
+ * Accepting voxels slightly outside the surface rescues thin features, but near
+ * the rim of a subtracted cavity it can also strand a speck a voxel or two
+ * across. Those cannot print and are not features, so they are dropped. Real
+ * modelling errors -- a limb that genuinely fails to meet the body -- discard a
+ * meaningful share of the model, which `islandFraction` reports so they are
+ * caught rather than quietly deleted.
+ */
+function pruneIslands(g: VoxelGrid): VoxelGrid {
+  const label = new Int32Array(g.data.length);
+  const N = g.w * g.d;
+  const sizes: number[] = [0];
+  const stack: number[] = [];
+  for (let start = 0; start < g.data.length; start++) {
+    if (!g.data[start] || label[start]) continue;
+    const id = sizes.length;
+    let size = 0;
+    label[start] = id;
+    stack.push(start);
+    while (stack.length) {
+      const p = stack.pop()!;
+      size++;
+      const x = p % g.w, y = Math.floor(p / g.w) % g.d, z = Math.floor(p / N);
+      const nb = [
+        x > 0 ? p - 1 : -1, x < g.w - 1 ? p + 1 : -1,
+        y > 0 ? p - g.w : -1, y < g.d - 1 ? p + g.w : -1,
+        z > 0 ? p - N : -1, z < g.h - 1 ? p + N : -1,
+      ];
+      for (const q of nb) if (q >= 0 && g.data[q] && !label[q]) { label[q] = id; stack.push(q); }
+    }
+    sizes.push(size);
+  }
+  if (sizes.length <= 2) return g;
+
+  let best = 1, total = 0;
+  for (let i = 1; i < sizes.length; i++) {
+    total += sizes[i];
+    if (sizes[i] > sizes[best]) best = i;
+  }
+  const out: VoxelGrid = { ...g, data: new Uint8Array(g.data.length) };
+  for (let i = 0; i < g.data.length; i++) if (label[i] === best) out.data[i] = 1;
+  out.islandFraction = (total - sizes[best]) / (total || 1);
+  return out;
+}
+
+/**
+ * Which modules the sculpture hides, seen from directly above.
+ *
+ * Occlusion is treated as solid dark because the sculpture prints in the dark
+ * filament, so a covered light module reads dark to a scanner. That is the
+ * worst case, and it is the one the decode check has to survive.
+ */
+export function occludedCode(qr: Bitmap, figure: VoxelGrid, originModule: number, subdiv: number): Bitmap {
+  const out = makeBitmap(qr.w, qr.h);
+  out.data.set(qr.data);
+  const span = Math.ceil(figure.w / subdiv);
+  for (let my = 0; my < span; my++) {
+    for (let mx = 0; mx < span; mx++) {
+      let covered = false;
+      for (let sy = 0; sy < subdiv && !covered; sy++) {
+        for (let sx = 0; sx < subdiv && !covered; sx++) {
+          const fx = mx * subdiv + sx, fy = my * subdiv + sy;
+          if (fx >= figure.w || fy >= figure.d) continue;
+          for (let z = 0; z < figure.h; z++) {
+            if (figure.data[idx(figure, fx, fy, z)]) { covered = true; break; }
+          }
+        }
+      }
+      // The figure grid is physical space; the code bitmap is image space.
+      if (covered) {
+        const x = originModule + mx;
+        const y = qr.h - 1 - (originModule + my);
+        if (x >= 0 && y >= 0 && x < qr.w && y < qr.h) out.data[y * qr.w + x] = 1;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The largest sculpture footprint this payload still decodes through.
+ *
+ * Error-correction headroom is not a fixed percentage of the picture: it
+ * depends on the version, the mask pattern, and which modules a given block
+ * spans. So the limit is measured against a real decoder for the actual code
+ * rather than assumed from the ECC level's nominal rate.
+ */
+const spanCache = new Map<string, number>();
+
+export function probeMaxSpan(qr: Bitmap, quietZone: number, moduleCount: number, payload: string): number {
+  // Each probe step is a full decode, so this is far too slow to redo on every
+  // keystroke; the answer depends only on the code itself.
+  const key = `${payload}|${moduleCount}|${quietZone}`;
+  const hit = spanCache.get(key);
+  if (hit !== undefined) return hit;
+  let best = 0;
+  for (let span = 2; span <= moduleCount; span++) {
+    const origin = quietZone + Math.floor((moduleCount - span) / 2);
+    const test = makeBitmap(qr.w, qr.h);
+    test.data.set(qr.data);
+    for (let y = origin; y < origin + span; y++) {
+      for (let x = origin; x < origin + span; x++) test.data[y * qr.w + x] = 1;
+    }
+    if (!verifyTopView(test, payload).matches) break;
+    best = span;
+  }
+  spanCache.set(key, best);
+  return best;
+}
+
+/** Voxels with nothing directly beneath them: what a slicer must prop up. */
+export function countOverhangs(g: VoxelGrid): number {
+  let n = 0;
+  for (let z = 1; z < g.h; z++) {
     for (let y = 0; y < g.d; y++) {
       for (let x = 0; x < g.w; x++) {
-        if (g.data[idx(g, x, y, z)]) b.data[z * g.w + x] = 1;
+        if (g.data[idx(g, x, y, z)] && !g.data[idx(g, x, y, z - 1)]) n++;
       }
     }
   }
-  return b;
+  return n;
 }
 
-function intersect(a: Bitmap, b: Bitmap): Bitmap {
-  const out = makeBitmap(a.w, a.h);
-  for (let i = 0; i < out.data.length; i++) out.data[i] = a.data[i] & b.data[i];
-  return out;
+/**
+ * Count physically separate pieces with 6-connectivity: voxels meeting only at
+ * an edge or a corner are not a printable weld. Everything reaching z = 0 rests
+ * on the plate and counts as one.
+ */
+export function countComponents(g: VoxelGrid): number {
+  const seen = new Uint8Array(g.data.length);
+  const N = g.w * g.d;
+  let components = 0;
+  let touchesBase = false;
+  const stack: number[] = [];
+  for (let start = 0; start < g.data.length; start++) {
+    if (!g.data[start] || seen[start]) continue;
+    let onBase = false;
+    components++;
+    seen[start] = 1;
+    stack.push(start);
+    while (stack.length) {
+      const p = stack.pop()!;
+      const x = p % g.w;
+      const y = Math.floor(p / g.w) % g.d;
+      const z = Math.floor(p / N);
+      if (z === 0) onBase = true;
+      const nb = [
+        x > 0 ? p - 1 : -1, x < g.w - 1 ? p + 1 : -1,
+        y > 0 ? p - g.w : -1, y < g.d - 1 ? p + g.w : -1,
+        z > 0 ? p - N : -1, z < g.h - 1 ? p + N : -1,
+      ];
+      for (const q of nb) if (q >= 0 && g.data[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
+    }
+    if (onBase) { if (touchesBase) components--; touchesBase = true; }
+  }
+  return components;
 }
 
 /** Re-project the voxel grid along each axis. This is the ground truth. */
@@ -269,74 +306,3 @@ export function project(g: VoxelGrid): { topAchieved: Bitmap; sideAchieved: Bitm
   return { topAchieved, sideAchieved };
 }
 
-/** Voxels with nothing directly beneath them: what a slicer would need to prop up. */
-function countOverhangs(g: VoxelGrid): number {
-  let n = 0;
-  for (let z = 1; z < g.h; z++) {
-    for (let y = 0; y < g.d; y++) {
-      for (let x = 0; x < g.w; x++) {
-        if (g.data[idx(g, x, y, z)] && !g.data[idx(g, x, y, z - 1)]) n++;
-      }
-    }
-  }
-  return n;
-}
-
-/**
- * Drop the empty layers above the artwork, so the reported height and the
- * slicer's bounding box match the object that actually prints.
- */
-function trimHeight(g: VoxelGrid): VoxelGrid {
-  const layer = g.w * g.d;
-  let top = -1;
-  for (let z = g.h - 1; z >= 0 && top < 0; z--) {
-    for (let i = 0; i < layer; i++) if (g.data[z * layer + i]) { top = z; break; }
-  }
-  const h = Math.max(1, top + 1);
-  return h === g.h ? g : { w: g.w, d: g.d, h, data: g.data.slice(0, h * layer) };
-}
-
-/**
- * Count physically separate pieces, using 6-connectivity: voxels meeting only
- * at an edge or a corner are not a printable weld, so they must not count as
- * joined. Everything resting on the base plate counts as one piece.
- */
-function countComponents(g: VoxelGrid): number {
-  const seen = new Uint8Array(g.data.length);
-  const N = g.w * g.d;
-  let components = 0;
-  let touchesBase = false;
-  const stack: number[] = [];
-
-  for (let start = 0; start < g.data.length; start++) {
-    if (!g.data[start] || seen[start]) continue;
-    let onBase = false;
-    components++;
-    seen[start] = 1;
-    stack.push(start);
-    while (stack.length) {
-      const p = stack.pop()!;
-      const x = p % g.w;
-      const y = Math.floor(p / g.w) % g.d;
-      const z = Math.floor(p / N);
-      if (z === 0) onBase = true;
-      const nb = [
-        x > 0 ? p - 1 : -1,
-        x < g.w - 1 ? p + 1 : -1,
-        y > 0 ? p - g.w : -1,
-        y < g.d - 1 ? p + g.w : -1,
-        z > 0 ? p - N : -1,
-        z < g.h - 1 ? p + N : -1,
-      ];
-      for (const q of nb) {
-        if (q >= 0 && g.data[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
-      }
-    }
-    // Pieces standing on the plate are held together by it, so they are one.
-    if (onBase) {
-      if (touchesBase) components--;
-      touchesBase = true;
-    }
-  }
-  return components;
-}

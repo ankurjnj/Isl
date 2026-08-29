@@ -3,13 +3,13 @@ import Viewer, { CameraPreset } from './components/Viewer';
 import Projection from './components/Projection';
 import ModelThumb from './components/ModelThumb';
 import { Bitmap } from './lib/bitmap';
+import { project } from './lib/voxel';
 import { Sdf } from './lib/sdf';
 import { extrudeSilhouette, revolveSilhouette } from './lib/voxelize';
 import { MODELS, getModel, matchModel } from './lib/models3d';
 import { DEFAULT_INPUT, buildDesign, exportObj, exportStl, printingNotes, type Design, type DesignInput } from './lib/pipeline';
 import { downloadBlob, imageFileToBitmap, slugify, textToBitmap } from './lib/browser';
 import type { EccLevel } from './lib/qr';
-import type { Support } from './lib/voxel';
 
 type ArtSource =
   | { kind: 'library'; id: string }
@@ -21,9 +21,10 @@ export default function App() {
   const [prompt, setPrompt] = useState('a cat sitting');
   const [art, setArt] = useState<ArtSource>({ kind: 'library', id: 'cat' });
   const [pinned, setPinned] = useState(false);
-  const [support, setSupport] = useState<Support>('grounded');
+  const [version, setVersion] = useState(DEFAULT_INPUT.version);
+  const [span, setSpan] = useState(DEFAULT_INPUT.span);
+  const [subdiv, setSubdiv] = useState(DEFAULT_INPUT.subdiv);
   const [ecc, setEcc] = useState<EccLevel>('H');
-  const [height, setHeight] = useState(DEFAULT_INPUT.height);
   const [moduleMm, setModuleMm] = useState(DEFAULT_INPUT.moduleMm);
   const [layerMm, setLayerMm] = useState(DEFAULT_INPUT.layerMm);
   const [baseMm, setBaseMm] = useState(DEFAULT_INPUT.baseMm);
@@ -60,8 +61,7 @@ export default function App() {
     const input: DesignInput = {
       ...DEFAULT_INPUT,
       payload: payload.trim(),
-      ecc, support, height, moduleMm, layerMm, baseMm,
-      plinth: Math.max(2, Math.round(height * 0.07)),
+      ecc, version, span, subdiv, moduleMm, layerMm, baseMm,
       model,
     };
     try {
@@ -71,11 +71,11 @@ export default function App() {
       setError(e instanceof Error ? e.message : String(e));
       return null;
     }
-  }, [model, payload, ecc, support, height, moduleMm, layerMm, baseMm]);
+  }, [model, payload, ecc, version, span, subdiv, moduleMm, layerMm, baseMm]);
 
   const notes = useMemo(
-    () => (design ? printingNotes({ ...DEFAULT_INPUT, payload, ecc, support, height, moduleMm, layerMm, baseMm, model: model! }, design) : []),
-    [design, payload, ecc, support, height, moduleMm, layerMm, baseMm, model],
+    () => (design ? printingNotes({ ...DEFAULT_INPUT, payload, ecc, version, span, subdiv, moduleMm, layerMm, baseMm, model: model! }, design) : []),
+    [design, payload, ecc, version, span, subdiv, moduleMm, layerMm, baseMm, model],
   );
 
   const onUpload = async (file: File) => {
@@ -169,17 +169,13 @@ export default function App() {
           />
         </section>
 
-        <section>
-          <label className="lbl">Structure</label>
-          <div className="seg">
-            <button className={support === 'grounded' ? 'on' : ''} onClick={() => setSupport('grounded')} type="button">Grounded</button>
-            <button className={support === 'solid' ? 'on' : ''} onClick={() => setSupport('solid')} type="button">Solid</button>
-          </div>
-          <p className="hint">
-            {support === 'grounded'
-              ? 'Every column reaches the plate on its own — one piece, no supports, no connecting rods. Shapes that taper are reproduced exactly.'
-              : 'The solid’s true occupancy, overhangs and all. Nothing can bridge sideways here, so parts floating above narrower parts become separate pieces — check the count below.'}
-          </p>
+        <section className="grid2">
+          <Field label={`Sculpture size — ${(span * 100).toFixed(0)}%`}>
+            <input className="range" type="range" min={0.15} max={0.7} step={0.01} value={span} onChange={(e) => setSpan(+e.target.value)} />
+          </Field>
+          <Field label={`Detail — ${subdiv}× per module`}>
+            <input className="range" type="range" min={1} max={8} step={1} value={subdiv} onChange={(e) => setSubdiv(+e.target.value)} />
+          </Field>
         </section>
 
         <section className="grid2">
@@ -191,8 +187,8 @@ export default function App() {
               <option value="H">H — 30%</option>
             </select>
           </Field>
-          <Field label={`Height — ${height} layers`}>
-            <input className="range" type="range" min={12} max={80} value={height} onChange={(e) => setHeight(+e.target.value)} />
+          <Field label={`Code grid — v${design?.qr.version ?? version}`}>
+            <input className="range" type="range" min={0} max={20} value={version} onChange={(e) => setVersion(+e.target.value)} />
           </Field>
           <Field label={`Module ${moduleMm.toFixed(1)} mm`}>
             <input className="range" type="range" min={0.8} max={5} step={0.1} value={moduleMm} onChange={(e) => setModuleMm(+e.target.value)} />
@@ -223,12 +219,12 @@ export default function App() {
 
               <dl className="stats">
                 <Stat k="Code" v={`v${design.qr.version}-${design.qr.ecc} · ${design.qr.moduleCount}²`} />
-                <Stat k="Size" v={`${design.dims.widthMm.toFixed(0)} × ${design.dims.depthMm.toFixed(0)} × ${design.dims.heightMm.toFixed(0)} mm`} />
-                <Stat k="Side fidelity" v={`${(design.build.report.sideFidelity * 100).toFixed(0)}%`} />
-                <Stat k="Pieces" v={`${design.build.report.looseParts}`} />
-                <Stat k="Overhangs" v={`${design.build.report.overhangs}`} />
-                <Stat k="Outline kept" v={`${(100 - design.build.report.outlineDistortion * 100).toFixed(0)}%`} />
-                <Stat k="Triangles" v={`${(design.mesh.body.triangleCount + design.mesh.base.triangleCount).toLocaleString()}`} />
+                <Stat k="Tile" v={`${design.dims.widthMm.toFixed(0)} × ${design.dims.depthMm.toFixed(0)} mm`} />
+                <Stat k="Sculpture" v={`${design.dims.figureMm.toFixed(0)} mm · ${design.report.figureVoxels}³ voxels`} />
+                <Stat k="Covers" v={`${(design.report.coverage * 100).toFixed(0)}% of ${design.report.maxSpanModules ? (design.report.maxSpanModules ** 2 / design.qr.moduleCount ** 2 * 100).toFixed(0) : 0}% max`} />
+                <Stat k="Detail" v={`${design.report.figureVoxelMm.toFixed(2)} mm/voxel`} />
+                <Stat k="Pieces" v={`${design.report.looseParts}`} />
+                <Stat k="Triangles" v={`${design.report.triangles.toLocaleString()}`} />
               </dl>
 
               {design.warnings.map((w, i) => (
@@ -288,18 +284,18 @@ export default function App() {
           {tab === 'model' && <Viewer design={design} preset={preset} showBase={showBase} />}
           {tab === 'top' && design && (
             <div className="flat">
-              <Projection bitmap={design.build.topAchieved} className="proj" />
+              <Projection bitmap={design.occluded} className="proj" />
               <p className="caption">
-                The model’s exact projection along the vertical axis. Point your phone at it — this is the
-                same image the built-in verifier decodes.
+                The code as a scanner sees it, with the sculpture standing on top and blocking part of it.
+                Point your phone at it — this is the same image the built-in verifier decodes.
               </p>
             </div>
           )}
           {tab === 'side' && design && (
             <div className="flat">
-              <Projection bitmap={design.build.sideAchieved} flipY className="proj" ink="#0b0d11" paper="#ffffff" />
+              <Projection bitmap={figureSide(design)} flipY className="proj" ink="#0b0d11" paper="#ffffff" />
               <p className="caption">
-                The exact projection along the depth axis — the outline you see edge-on.
+                The sculpture’s exact outline, seen edge-on.
               </p>
             </div>
           )}
@@ -307,6 +303,10 @@ export default function App() {
       </main>
     </div>
   );
+}
+
+function figureSide(design: Design) {
+  return project(design.figure).sideAchieved;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

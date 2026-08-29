@@ -22,9 +22,11 @@ export default function ModelThumb({ sdf, size = 30 }: { sdf: Sdf; size?: number
       for (let px = 0; px < size; px++) {
         const mx = (px + 0.5) / size - 0.5;
         // Sample a few depths: a thin feature can sit off the centre plane.
+        // Sample across the depth: a thin feature -- a fin, an ear, a handle --
+        // can sit well off the centre plane.
         let hit = false;
-        for (let k = 0; k < 5 && !hit; k++) {
-          if (sdf(mx, (k / 4 - 0.5) * 0.5, mz) < 0) hit = true;
+        for (let k = 0; k < 9 && !hit; k++) {
+          if (sdf(mx, k / 8 - 0.5, mz) < 0) hit = true;
         }
         if (hit) ctx.fillRect(px, py, 1, 1);
       }

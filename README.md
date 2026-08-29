@@ -8,84 +8,86 @@ Type a link, type a prompt, get an STL.
 
 ## How it works
 
-### The constraint everything follows from
+The print is **two solids sharing one base plate**: a code tile at module
+resolution, and a sculpture at a much finer pitch standing on it.
 
-Anything above the code plane occludes the code. So material may only ever
-stand over a dark module, **at any height**. Which means two parts of the
-sculpture can touch only where their modules are face-adjacent in the code —
-no horizontal bridging is possible anywhere, ever.
+That split is the whole design, and it took three attempts to arrive at.
 
-A QR always contains isolated modules. So a shape with a part that floats above
-a narrower part below it — a canopy over a trunk, a cap over a stalk — cannot
-be a single printable object. There are exactly two honest resolutions: hold it
-with rods, or give every column its own path to the ground. This build takes
-the second, so there are no connecting rods anywhere.
+### Why the sculpture is not carved from the code
 
-### The construction
+The obvious approach is to make the sculpture *be* the code — intersect a shape
+with the QR and print what survives. It cannot work, and the reason is worth
+stating precisely:
 
-Subjects are **real 3D solids**, composed from signed-distance primitives —
-cones, frustums, capsules, boxes — and voxelised. The code is then carved out
-of the solid:
+> Anything above the code plane occludes the code. So material may only stand
+> over a dark module, **at any height**. Two parts of such a sculpture can
+> therefore touch only where their modules are face-adjacent in the code — no
+> horizontal bridging is possible anywhere, ever.
 
-```
-V(x, y, z) = QR(x, y) ∧ M(x, y, z)
-```
+A QR always contains isolated modules, so this shatters the shape. Measured on
+real codes, a carved sculpture came out in **86 to 362 disconnected pieces**.
+The only ways to print that are thin connecting rods, or filling every column
+down to the plate — and filling propagates each column's width downward, which
+flattens the model into a relief and destroys exactly the detail that made it
+recognisable. Both were tried; both are dead ends.
 
-Because `M` is a genuine solid rather than an outline given depth, its
-occupancy varies along every axis, and so does the result. Projecting back:
+### What buys the way out
 
-```
-top(x, y)  = QR(x, y) ∧ (the solid stands somewhere in that column)
-side(x, z) = M's outline ∧ (that code column carries ink somewhere)
-```
+Error correction. A QR at ECC Q or H reads through roughly a fifth of its area
+being obscured — the same allowance that lets a logo sit in the middle of a
+printed code. So the sculpture does not need to *be* the code. It can simply
+**stand on** it and hide part of it.
 
-The top view is the one that must never be approximate, and the plinth
-guarantees it: a pedestal spanning every data column means each dark module
-carries material regardless of where the sculpture happens to stand. The side
-view needs no such device — it only needs one dark module anywhere across the
-depth, and with tens of columns to draw from it survives at 92–100%.
+That single change removes every constraint from the sculpture at once:
 
-### Grounding, and why the library looks the way it does
+- **Not masked**, so nothing shreds its detail.
+- **Not grounded**, so it keeps undercuts — a cap over a stalk, a canopy over a
+  trunk, a teapot's handle.
+- **Not on the module grid**, so its resolution is set by what the printer can
+  hold, not by the size of a QR module. At the default it is ~80 voxels across
+  at 0.5 mm each.
 
-Every column is filled from the plate up to the solid's top surface. That is
-what removes the rods, and it has a price: filling a column downward propagates
-its width all the way down. A shape that re-widens above a narrow point loses
-exactly the feature that made it recognisable — a chess king becomes a taper,
-a mushroom becomes a bell. A shape that **tapers** is reproduced faithfully.
+The allowance is measured, not assumed: `probeMaxSpan` binary-walks the real
+decoder against the actual code, because the headroom depends on the version,
+the mask pattern and which blocks a given region spans — not just the ECC
+level's nominal rate. The app clamps the sculpture to that measured limit rather
+than shipping something that does not scan.
 
-So the library is authored to that constraint rather than against it. Two rules
-came out of testing every candidate:
+### The models
 
-- **Radius never grows with height.** Standing, tapering subjects are the ones
-  this medium renders: towers, trees, rockets, peaks, seated animals.
-- **Stepped profiles beat smooth ones.** The silhouette is only ~30 modules
-  tall, so a gentle curve becomes an anonymous mound — a snowman, a penguin and
-  a vase all came out as the same nondescript hill. A hard setback survives as
-  a shape you can name, which is why the skyscraper has deco setbacks and the
-  lighthouse has a gallery.
+Composed from signed-distance primitives — cones, frustums, capsules, boxes,
+tapered blades — and voxelised. Because they are free-standing, they can have
+the things that make an object recognisable: a rocket has a flared engine bell,
+a stage band, a porthole and four swept fins; a cat has ears, a muzzle, front
+legs, paws and a curled tail; a tree has a trunk under a lumpy canopy.
 
-`outlineDistortion` reports what grounding cost each subject, so the trade is
-visible rather than hidden. **Solid** mode is available for the true occupancy
-with overhangs kept — it reports floating pieces honestly rather than welding
-them.
+Models are normalised into their footprint using the bounds their primitives
+carry, so authored coordinates need not be calibrated by hand and every model
+fills the space it is given, with its height following from its own proportions.
+
+Two things keep voxelisation honest. Samples are accepted slightly outside the
+surface, which rescues features thinner than the voxel pitch — a fin, an ear, a
+railing post — for one evaluation instead of the eight that supersampling would
+cost. And because that tolerance can strand a speck a voxel or two across near
+the rim of a subtracted cavity, only the largest connected body is kept, with
+the discarded fraction reported so a genuine modelling error (a limb that fails
+to meet the body) is surfaced rather than quietly deleted.
+
+### Printability
+
+- **One piece**, asserted for every model in the suite.
+- **Overhangs are allowed** and counted; the sculpture needs supports, the tile
+  does not.
+- **A base plate**, which gives a scanner its contrast — light plate, dark code.
+- **Greedy quad meshing**, cutting a naive six-quads-per-voxel mesh by an order
+  of magnitude without changing the shape.
 
 ### Supplying the subject
 
 1. **A prompt**, matched against the model library.
-2. **An uploaded image**, turned on a lathe — a genuine solid interpretation of
-   an outline rather than a slab.
-3. **A word**, cast as raised lettering. This is the one extruded case, because
+2. **An uploaded image**, turned on a lathe — a real solid rather than a slab.
+3. **A word**, cast as raised lettering. The one extruded case, because
    extruded lettering is what 3D text actually *is*.
-
-### Printability
-
-- **One piece.** Every column reaches the plate, so nothing falls off.
-- **Zero overhangs**, measured, so it prints with no supports at all.
-- **Zero connecting rods**, by construction rather than by repair.
-- **A base plate**, which gives a scanner its contrast — light plate, dark code
-  — and ties the code's isolated modules together.
-- **Greedy quad meshing**, cutting a naive six-quads-per-voxel mesh by an order
-  of magnitude without changing the shape.
 
 ## Verification
 
@@ -102,18 +104,22 @@ suites assert on finder-pattern corners instead, which are asymmetric by
 construction — a QR has them at top-left, top-right and bottom-left, and never
 at bottom-right.
 
-**"Looks 3D" is not a claim you can eyeball.** The suite measures it: for each
-column, how many *distinct* height profiles do the open depth slices carry? A
-shape swept along the depth axis scores exactly 1.00, because every slice
-carries the same profile. The modelled solids score well above that — the
-difference between a shape with form and a shape without.
+**The occlusion limit is measured against the real decoder, in both
+directions.** The suite asserts not only that the chosen footprint decodes, but
+that one module *past* the probe's answer stops decoding — otherwise the probe
+would be reporting headroom that is not there.
 
-**"Prints in one piece" is not a claim you can eyeball either.** Every model in
-the library is asserted to come out at exactly one connected piece (6-connected:
-voxels meeting at an edge or a corner are not a printable weld) with zero
-overhanging voxels. A deliberately overhung test shape confirms the reporting
-is real — in Solid mode it comes back as multiple pieces rather than silently
-welded.
+**"Prints in one piece" is not a claim you can eyeball.** Every model is
+asserted to come out at exactly one connected body (6-connected: voxels meeting
+at an edge or a corner are not a printable weld). This caught three real
+modelling errors — a mushroom cap that only touched its stalk, a whale's flukes
+abutting rather than overlapping the peduncle, and a whale stand that stopped
+short of the body.
+
+**Detail is asserted to be independent of the code.** Raising the sculpture's
+resolution must change its voxel count without touching the code's module
+count — that separation is the entire point of standing the figure on the tile
+rather than carving it from it.
 
 **A triangle count says nothing about whether a mesh is printable.** The mesh
 is checked by signed volume via the divergence theorem, which for a closed
@@ -131,7 +137,7 @@ npm install
 npm run dev          # the app
 npm test             # geometry, orientation, mesh, STL, prompt matching
 npm run test:e2e     # browser: decodes the actual painted pixels (dev server must be running)
-npm run models       # ASCII-render every solid, grounded and code-masked
+npm run models       # ASCII-render every sculpture, with piece and overhang counts
 npm run views        # ASCII-render both projections of a build
 ```
 
@@ -178,10 +184,10 @@ skull gets its eye sockets.
 
 ```
 src/lib/
-  sdf.ts          3D distance primitives and combinators
-  models3d.ts     the solids, and the prompt matcher
+  sdf.ts          3D distance primitives, combinators, bounds-culled union
+  models3d.ts     the sculptures, and the prompt matcher
   voxelize.ts     lathe and lettering adapters for 2D input
-  voxel.ts        the construction, plinth, grounding, fidelity report
+  voxel.ts        tile, figure, occlusion, and the decode-limit probe
   bitmap.ts       binary rasters, fitting, projection helpers
   qr.ts           QR module matrix, quiet zone included
   path.ts         SVG path parser and bezier flattener

@@ -7,6 +7,11 @@ export interface MeshOptions {
   layerMm: number;
   /** Thickness of the light-coloured base plate, in mm. */
   baseMm: number;
+  /** Where the grid's (0,0,0) corner sits, in mm. Lets a fine-resolution
+   *  figure be placed on a coarse tile in the same coordinate space. */
+  origin?: [number, number, number];
+  /** Emit the base plate. Only the tile needs one. */
+  withBase?: boolean;
 }
 
 export interface Mesh {
@@ -92,11 +97,12 @@ function box(s: Sink, x0: number, y0: number, z0: number, x1: number, y1: number
  */
 export function meshSculpture(grid: VoxelGrid, opts: MeshOptions): SculptureMesh {
   const { moduleMm, layerMm, baseMm } = opts;
+  const [ox, oy, oz] = opts.origin ?? [0, 0, 0];
   const s: Sink = { pos: [], nrm: [] };
 
   const dims = [grid.w, grid.d, grid.h];
   const scale = [moduleMm, moduleMm, layerMm];
-  const offset = [0, 0, baseMm];
+  const offset = [ox, oy, oz];
 
   const solid = (c: number[]) => {
     if (c[0] < 0 || c[1] < 0 || c[2] < 0) return 0;
@@ -178,7 +184,9 @@ export function meshSculpture(grid: VoxelGrid, opts: MeshOptions): SculptureMesh
   // Base plate: the light-coloured slab everything stands on. It is what gives
   // the top view its contrast, and it ties the QR's isolated dark modules into
   // one printable piece.
-  if (baseMm > 0) box(s, 0, 0, 0, grid.w * moduleMm, grid.d * moduleMm, baseMm);
+  if (baseMm > 0 && (opts.withBase ?? true)) {
+    box(s, ox, oy, 0, ox + grid.w * moduleMm, oy + grid.d * moduleMm, baseMm);
+  }
   const base = drain(s);
 
   return { body, base };

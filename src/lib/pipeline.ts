@@ -1,21 +1,30 @@
+import { Bitmap } from './bitmap';
 import { EccLevel, makeQr, QrResult } from './qr';
-import { concatMeshes, meshSculpture, SculptureMesh } from './mesh';
-import { BuildResult, buildSculpture, Support } from './voxel';
-import { Sdf } from './sdf';
+import { concatMeshes, meshSculpture, Mesh } from './mesh';
+import {
+  buildFigure, buildTile, countComponents, countOverhangs,
+  occludedCode, probeMaxSpan, VoxelGrid,
+} from './voxel';
 import { meshToObj, meshToStl } from './stl';
 import { verifyTopView, VerifyResult } from './verify';
+import { Sdf } from './sdf';
 
 export interface DesignInput {
   payload: string;
   ecc: EccLevel;
   quietZone: number;
-  /** The solid to carve the code out of. */
+  /** Force a larger module grid than the payload needs. 0 = smallest that fits. */
+  version: number;
+  /** The sculpture. */
   model: Sdf;
-  support: Support;
-  /** Voxel layers of height. */
-  height: number;
-  /** Pedestal height in layers. */
-  plinth: number;
+  /** Sculpture footprint, as a fraction of the code's width. */
+  span: number;
+  /** Sculpture voxels per code module. Its resolution, independent of the code. */
+  subdiv: number;
+  /** Sculpture height as a multiple of its width. */
+  heightScale: number;
+  /** Layers of raised code on the plate. */
+  tileLayers: number;
   moduleMm: number;
   layerMm: number;
   baseMm: number;
@@ -25,100 +34,160 @@ export interface Dimensions {
   widthMm: number;
   depthMm: number;
   heightMm: number;
+  figureMm: number;
+}
+
+export interface DesignReport {
+  /** Modules the sculpture covers, and the most this code can spare. */
+  spanModules: number;
+  maxSpanModules: number;
+  /** Fraction of the code's area the sculpture stands on. */
+  coverage: number;
+  /** Sculpture voxels across. Its real resolution. */
+  figureVoxels: number;
+  figureVoxelMm: number;
+  /** Overhangs in the sculpture. Non-zero is fine; it just needs supports. */
+  overhangs: number;
+  /** Sculpture pieces. Must be 1. */
+  looseParts: number;
+  /** Share of the model dropped as disconnected specks. */
+  islandFraction: number;
+  triangles: number;
 }
 
 export interface Design {
   qr: QrResult;
-  build: BuildResult;
-  mesh: SculptureMesh;
+  tile: VoxelGrid;
+  figure: VoxelGrid;
+  /** The code as a scanner sees it, with the sculpture blocking part of it. */
+  occluded: Bitmap;
+  meshes: { tile: Mesh; figure: Mesh; base: Mesh };
   verify: VerifyResult;
   dims: Dimensions;
+  report: DesignReport;
   warnings: string[];
 }
 
 export const DEFAULT_INPUT: Omit<DesignInput, 'model' | 'payload'> = {
   ecc: 'H',
   quietZone: 4,
-  support: 'grounded',
-  height: 40,
-  plinth: 3,
-  moduleMm: 2.0,
-  layerMm: 1.4,
-  baseMm: 2.0,
+  version: 10,
+  span: 0.95,
+  subdiv: 3,
+  heightScale: 1,
+  tileLayers: 2,
+  moduleMm: 1.6,
+  layerMm: 0.8,
+  baseMm: 1.6,
 };
 
 export function buildDesign(input: DesignInput): Design {
-  const qr = makeQr(input.payload, input.ecc, input.quietZone);
-  const build = buildSculpture(qr.bitmap, input.model, qr.quietZone, {
-    support: input.support,
-    height: input.height,
-    plinth: input.plinth,
+  const qr = makeQr(input.payload, input.ecc, input.quietZone, input.version || undefined);
+  const n = qr.moduleCount;
+
+  const maxSpanModules = probeMaxSpan(qr.bitmap, qr.quietZone, n, input.payload);
+  const wanted = Math.max(4, Math.round(n * input.span));
+  // Never let the sculpture grow past what the decoder actually tolerates.
+  const spanModules = Math.min(wanted, Math.max(4, maxSpanModules));
+
+  const tile = buildTile(qr.bitmap, input.tileLayers);
+  const figure = buildFigure(input.model, spanModules, input.subdiv, input.heightScale);
+
+  const originModule = qr.quietZone + Math.floor((n - spanModules) / 2);
+  const occluded = occludedCode(qr.bitmap, figure, originModule, input.subdiv);
+  const verify = verifyTopView(occluded, input.payload);
+
+  // The sculpture's voxel is finer than a module, and cubic, so the figure
+  // keeps its proportions instead of being stretched by the tile's layer height.
+  const figureVoxelMm = input.moduleMm / input.subdiv;
+  const originMm: [number, number, number] = [
+    originModule * input.moduleMm,
+    originModule * input.moduleMm,
+    input.baseMm,
+  ];
+
+  const tileMesh = meshSculpture(tile, {
+    moduleMm: input.moduleMm, layerMm: input.layerMm, baseMm: input.baseMm,
+    origin: [0, 0, input.baseMm], withBase: true,
   });
-  const mesh = meshSculpture(build.grid, {
-    moduleMm: input.moduleMm,
-    layerMm: input.layerMm,
-    baseMm: input.baseMm,
+  const figureMesh = meshSculpture(figure, {
+    moduleMm: figureVoxelMm, layerMm: figureVoxelMm, baseMm: 0,
+    origin: originMm, withBase: false,
   });
-  const verify = verifyTopView(build.topAchieved, input.payload);
+
   const dims: Dimensions = {
-    widthMm: build.grid.w * input.moduleMm,
-    depthMm: build.grid.d * input.moduleMm,
-    heightMm: input.baseMm + build.grid.h * input.layerMm,
+    widthMm: tile.w * input.moduleMm,
+    depthMm: tile.d * input.moduleMm,
+    heightMm: input.baseMm + figure.h * figureVoxelMm,
+    figureMm: figure.w * figureVoxelMm,
   };
 
-  return { qr, build, mesh, verify, dims, warnings: collectWarnings(input, build, verify, dims) };
+  const report: DesignReport = {
+    spanModules,
+    maxSpanModules,
+    coverage: (spanModules * spanModules) / (n * n),
+    figureVoxels: figure.w,
+    figureVoxelMm,
+    overhangs: countOverhangs(figure),
+    looseParts: countComponents(figure),
+    islandFraction: figure.islandFraction ?? 0,
+    triangles: tileMesh.body.triangleCount + figureMesh.body.triangleCount + tileMesh.base.triangleCount,
+  };
+
+  return {
+    qr, tile, figure, occluded,
+    meshes: { tile: tileMesh.body, figure: figureMesh.body, base: tileMesh.base },
+    verify, dims, report,
+    warnings: collectWarnings(input, report, verify, dims),
+  };
 }
 
-/**
- * Practical checks a slicer will not make for you.
- *
- * These are all failure modes that only show up after a print has finished, so
- * they are worth raising up front even when the geometry itself is sound.
- */
+/** Practical checks a slicer will not make for you. */
 function collectWarnings(
-  input: DesignInput,
-  build: BuildResult,
-  verify: VerifyResult,
-  dims: Dimensions,
+  input: DesignInput, report: DesignReport, verify: VerifyResult, dims: Dimensions,
 ): string[] {
   const w: string[] = [];
-
   if (!verify.matches) {
     w.push(
       verify.decoded
         ? 'The top view decodes to different data than you entered. Do not print this.'
-        : 'The top view did not decode. Do not print this — try a shorter payload or a higher ECC level.',
+        : 'The top view did not decode. Shrink the sculpture, or raise the error-correction level.',
     );
   }
   // 1.2 mm is the widely cited floor for a printed module to survive nozzle
   // width and elephant-foot squish and still read on a phone.
   if (input.moduleMm < 1.2) {
-    w.push(`Modules are ${input.moduleMm} mm. Below about 1.2 mm a printed QR usually stops scanning.`);
+    w.push(`Modules are ${input.moduleMm} mm. Below about 1.2 mm a printed code usually stops scanning.`);
   }
-  if (input.baseMm < 0.8) {
-    w.push('The base plate is very thin and may warp or tear off the bed.');
-  }
-  if (build.report.looseParts > 1) {
+  // A 0.4 mm nozzle cannot resolve a feature thinner than its own bead.
+  if (report.figureVoxelMm < 0.4) {
     w.push(
-      `${build.report.looseParts} separate pieces — parts of this shape float above narrower parts, ` +
-      'and nothing can bridge sideways to hold them. Switch back to Grounded, or pick a subject that tapers.',
+      `Sculpture voxels are ${report.figureVoxelMm.toFixed(2)} mm — finer than a 0.4 mm nozzle can print. ` +
+      'Lower the detail, or raise the module size.',
     );
   }
-  if (build.report.overhangs > 0) {
-    w.push(`${build.report.overhangs} voxels overhang and will need slicer supports.`);
-  }
-  if (build.report.blindColumns.length) {
+  // Specks are sampling noise; losing a real share of the model is a modelling
+  // error and must not pass silently.
+  if (report.islandFraction > 0.02) {
     w.push(
-      `${build.report.blindColumns.length} column(s) of the code are entirely light, so nothing may stand there. ` +
-      'Changing the payload or ECC level reshuffles the code and usually clears it.',
+      `${(report.islandFraction * 100).toFixed(1)}% of this model was disconnected from its body and dropped — ` +
+      'part of the shape is not joined to the rest.',
     );
   }
-  if (build.report.outlineDistortion > 0.35) {
+  if (report.looseParts > 1) {
+    w.push(`The sculpture is in ${report.looseParts} disconnected pieces and will not print as one object.`);
+  }
+  if (report.overhangs > 0) {
+    w.push(`The sculpture has ${report.overhangs} overhanging voxels — print it with supports.`);
+  }
+  if (report.spanModules < Math.round(input.span * (report.maxSpanModules / (report.coverage ? 1 : 1)))
+      && report.spanModules === report.maxSpanModules) {
     w.push(
-      `Grounding moved ${(build.report.outlineDistortion * 100).toFixed(0)}% of this shape's outline — it re-widens ` +
-      'above a narrow point, so it is losing the feature that made it recognisable. A tapering subject will read better.',
+      `The sculpture is capped at ${report.spanModules} modules — any larger and this code stops decoding. ` +
+      'A longer payload or a higher version gives a bigger code and more room.',
     );
   }
+  if (input.baseMm < 0.8) w.push('The base plate is very thin and may warp or tear off the bed.');
   if (Math.max(dims.widthMm, dims.depthMm) > 250) {
     w.push(`At ${dims.widthMm.toFixed(0)} mm across this will not fit on most 220–250 mm beds.`);
   }
@@ -126,30 +195,22 @@ function collectWarnings(
 }
 
 export function exportStl(design: Design, name: string): ArrayBuffer {
-  return meshToStl(concatMeshes(design.mesh.body, design.mesh.base), name);
+  return meshToStl(concatMeshes(design.meshes.tile, design.meshes.figure, design.meshes.base), name);
 }
 
 export function exportObj(design: Design): string {
-  return meshToObj(concatMeshes(design.mesh.body, design.mesh.base));
+  return meshToObj(concatMeshes(design.meshes.tile, design.meshes.figure, design.meshes.base));
 }
 
-/** Slicer-facing notes that depend on the actual numbers chosen. */
 export function printingNotes(input: DesignInput, design: Design): string[] {
-  const colourChangeMm = input.baseMm;
   return [
-    design.build.report.overhangs === 0
-      ? 'Print with no supports. Every column reaches the plate on its own, so there is nothing to prop up.'
-      : `Enable supports: ${design.build.report.overhangs} voxels overhang.`,
-    `Insert a filament change at Z = ${colourChangeMm.toFixed(2)} mm. Below it is the base plate — use a light colour. Above it is the code and the artwork — use a dark, matte colour.`,
-    `Layer height must divide ${input.layerMm} mm evenly, so the artwork's steps land on layer boundaries. ${suggestLayerHeights(input.layerMm)}`,
-    `Total size ${design.dims.widthMm.toFixed(1)} x ${design.dims.depthMm.toFixed(1)} x ${design.dims.heightMm.toFixed(1)} mm.`,
-    `Matte filament scans far better than glossy — specular highlights are what usually defeat a scanner on a printed code.`,
-    `Scan the finished print straight down, with diffuse light. The code is only a QR code from directly above.`,
+    `Insert a filament change at Z = ${input.baseMm.toFixed(2)} mm. Below it is the base plate — use a light colour. Above it is the code and the sculpture — use a dark, matte colour.`,
+    design.report.overhangs === 0
+      ? 'No supports needed: nothing in the sculpture overhangs.'
+      : `Enable supports for the sculpture (${design.report.overhangs} overhanging voxels). Keep them off the code — the tile needs none.`,
+    `The sculpture's detail is ${design.report.figureVoxelMm.toFixed(2)} mm per voxel; use a layer height at or below that to keep it.`,
+    `Tile ${design.dims.widthMm.toFixed(0)} × ${design.dims.depthMm.toFixed(0)} mm, sculpture ${design.dims.figureMm.toFixed(0)} mm across, ${design.dims.heightMm.toFixed(0)} mm tall overall.`,
+    'Matte filament scans far better than glossy — specular highlights are what usually defeat a scanner on a printed code.',
+    'Scan straight down, with diffuse light. The code reads from above; the sculpture is what you see from anywhere else.',
   ];
-}
-
-function suggestLayerHeights(layerMm: number): string {
-  const options = [0.1, 0.12, 0.15, 0.16, 0.2, 0.25, 0.28, 0.3];
-  const fits = options.filter((o) => Math.abs((layerMm / o) - Math.round(layerMm / o)) < 1e-6);
-  return fits.length ? `Try ${fits.map((f) => f + ' mm').join(', ')}.` : 'No common layer height divides it exactly.';
 }
