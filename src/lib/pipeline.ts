@@ -50,6 +50,8 @@ export interface DesignReport {
   detailCapped: boolean;
   /** Share of the sculpture shaved away to make it self-supporting. */
   shavedFraction: number;
+  /** Needle columns cut back to sit with their neighbours. */
+  trimmedColumns: number;
   /** True when the sculpture was cut back to keep the code readable. */
   spanClamped: boolean;
   /** Light modules darkened to join the sculpture. Each is one module of error. */
@@ -89,7 +91,10 @@ export const DEFAULT_INPUT: Omit<DesignInput, 'model' | 'payload'> = {
   // the same size either way. A 41-module code at 2.6 mm is 6.5 nozzle widths
   // per module; the 65-module code it replaces was 4.0 and printed poorly.
   version: 6,
-  span: 0.72,
+  // The sculpture takes the whole code by default. Confined to a centre square
+  // it reads as a lump dropped on a flat pattern; spanning the lot, the code
+  // and the sculpture are one object.
+  span: 1,
   zSub: 2,
   // The sculpture is sampled three times finer than the code across, which the
   // code does not mind: a sub-voxel sits wholly inside one module, and the tile
@@ -190,6 +195,7 @@ export function buildDesign(input: DesignInput): Design {
     cellMm,
     detailCapped: detail < Math.round(input.xySub),
     shavedFraction: carved.shavedFraction,
+    trimmedColumns: carved.trimmedColumns,
     spanClamped: carved.spanModules < Math.round(qr.moduleCount * input.span),
     bridges: carved.bridges,
     driftFraction: drift / (qr.moduleCount * qr.moduleCount),

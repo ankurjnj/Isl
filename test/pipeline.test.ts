@@ -330,6 +330,54 @@ console.log('\n== a build always terminates, whatever the settings ==');
   check('and the result is still valid', heavy.verify.matches && heavy.report.looseParts === 1);
 }
 
+console.log('\n== the sculpture takes the whole code, and leaves no needles ==');
+{
+  // Confined to a centre square the sculpture reads as a lump dropped on a flat
+  // pattern. It should use every module the code can spare.
+  const d = design();
+  check('it spans the whole code by default', d.report.spanModules === d.report.moduleCount,
+    `${d.report.spanModules} of ${d.report.moduleCount} modules`);
+
+  // Carving leaves needles: a dark module with no dark neighbour still rises to
+  // the model's surface, printing as a lone spike attached at its foot. So does
+  // a prop reaching a long way up to hold a scrap.
+  const towers = (g: typeof d.grid, sub: number, tile: number) => {
+    const N = g.w * g.d, mods = Math.floor(g.w / sub);
+    const top = new Int32Array(mods * mods).fill(-1);
+    for (let z = g.h - 1; z >= 0; z--) {
+      for (let y = 0; y < g.d; y++) {
+        for (let x = 0; x < g.w; x++) {
+          if (!g.data[z * N + y * g.w + x]) continue;
+          const k = Math.floor(y / sub) * mods + Math.floor(x / sub);
+          if (top[k] < 0) top[k] = z;
+        }
+      }
+    }
+    let n = 0;
+    for (let my = 1; my < mods - 1; my++) {
+      for (let mx = 1; mx < mods - 1; mx++) {
+        const h = top[my * mods + mx];
+        if (h < tile + 6) continue;
+        let tallest = 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+          tallest = Math.max(tallest, top[(my + dy) * mods + (mx + dx)]);
+        }
+        if (h - tallest > 6) n++;
+      }
+    }
+    return n;
+  };
+  for (const id of ['cat', 'rocket', 'tree']) {
+    const m = design({ model: getModel(id)!.sdf });
+    check(`${id}: few columns stand clear of everything around them`,
+      towers(m.grid, m.report.xySub, DEFAULT_INPUT.tileLayers) <= 4,
+      `${towers(m.grid, m.report.xySub, DEFAULT_INPUT.tileLayers)} towers, ${m.report.trimmedColumns} trimmed`);
+  }
+  // Trimming and scrapping only remove material, so the code cannot be harmed.
+  check('and the code still reads', d.verify.matches && d.report.looseParts === 1,
+    `${(d.report.driftFraction * 100).toFixed(1)}% drift`);
+}
+
 console.log('\n== the mesh is a closed, correctly-wound solid ==');
 {
   const signedVolume = (m: { positions: Float32Array; triangleCount: number }) => {

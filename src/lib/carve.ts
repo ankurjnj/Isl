@@ -61,6 +61,8 @@ export interface CarveResult {
   bridges: number;
   /** Fragments too small to be worth a bridge, removed instead. */
   droppedSpecks: number;
+  /** Columns cut back because they stood clear of everything around them. */
+  trimmedColumns: number;
   /** Share of the carved model shaved away to make it self-supporting. */
   shavedFraction: number;
   /** Supports added under parts that reached nothing. One column each. */
@@ -245,23 +247,37 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
     for (let z = 0; z < tile; z++) setModule(mx, my, z, 1);
     code.data[(d - 1 - my) * w + mx] = 1;
 
-    // And it has to carry material at the heights its neighbours occupy.
-    // Joining fragments only in plan leaves them still adrift in space -- a
-    // mushroom cap floating a dozen layers above the bridge that was supposed
-    // to hold it, and needing a prop under every fragment instead.
+    // And it has to carry material at the heights its neighbours occupy, or
+    // fragments joined in plan are still adrift in space -- a mushroom cap
+    // floating a dozen layers above the bridge meant to hold it.
+    //
+    // But only where it genuinely joins TWO of them. Filling wherever any one
+    // neighbour happened to have material grew the bridge into a spike beside
+    // whatever it stood next to: measured against a seated cat, nine columns
+    // ended up standing clear of everything around them, the worst by 91
+    // layers. A cell touching one neighbour bridges nothing; it is just a tower.
     const nb: [number, number][] = [[mx - 1, my], [mx + 1, my], [mx, my - 1], [mx, my + 1]];
+    let topNeeded = -1;
     for (let z = tile; z < h; z++) {
+      let touching = 0;
       for (const [nx, ny] of nb) {
         if (nx < 0 || ny < 0 || nx >= w || ny >= d) continue;
-        if (moduleHas(nx, ny, z)) { setModule(mx, my, z, 1); break; }
+        if (moduleHas(nx, ny, z)) touching++;
       }
+      if (touching >= 2) topNeeded = z;
     }
+    // Contiguous from the tile to the highest junction, so the bridge is a
+    // stub of the sculpture rather than floating segments.
+    for (let z = tile; z <= topNeeded; z++) setModule(mx, my, z, 1);
   }
 
   // A connected footprint does not guarantee a connected solid: two adjacent
   // columns can hold material at heights that never meet. Whatever is still
   // adrift is propped up, one module column each.
   const carvedTotal = countSolid(grid);
+  // Trim needles before propping: a spike deleted here is one that needs no
+  // prop at all.
+  const trimmedColumns = trimSpikes(grid, tile, xySub, 4, setModule);
   const filledColumns = fillStragglers(grid, tile, xySub, setModule);
   const after = countSolid(grid);
 
@@ -281,6 +297,7 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
     originModule,
     xySub,
     droppedSpecks: dropped,
+    trimmedColumns,
     shavedFraction: carvedTotal ? shaved / carvedTotal : 0,
     bridges: bridges.length,
     filledColumns,
@@ -324,6 +341,63 @@ function dropSpecks(
   return dropped;
 }
 
+/**
+ * Cut back columns that stand far clear of everything around them.
+ *
+ * Carving leaves needles: a dark module with no dark neighbour still rises to
+ * meet the model's surface, so it prints as a lone spike attached only at its
+ * foot. On a seated cat ten of these stood more than six layers above every
+ * neighbour, the worst by ninety-one. They read as debris rather than form, and
+ * a one-module-square spike ninety layers tall is not something to hand a
+ * printer either.
+ *
+ * Trimming only removes material, so the code is untouched -- the tile beneath
+ * still carries every dark module -- and nothing can be left floating, since a
+ * column is cut from the top down.
+ */
+function trimSpikes(
+  g: VoxelGrid, tile: number, xySub: number, allowance: number,
+  setModule: (mx: number, my: number, z: number, v: number) => void,
+): number {
+  const N = g.w * g.d;
+  const mods = Math.floor(g.w / xySub);
+  const top = new Int32Array(mods * mods);
+  let trimmed = 0;
+
+  for (let pass = 0; pass < 3; pass++) {
+    top.fill(-1);
+    for (let z = g.h - 1; z >= 0; z--) {
+      for (let y = 0; y < g.d; y++) {
+        for (let x = 0; x < g.w; x++) {
+          if (!g.data[z * N + y * g.w + x]) continue;
+          const k = Math.floor(y / xySub) * mods + Math.floor(x / xySub);
+          if (top[k] < 0) top[k] = z;
+        }
+      }
+    }
+    let cut = 0;
+    for (let my = 0; my < mods; my++) {
+      for (let mx = 0; mx < mods; mx++) {
+        const h = top[my * mods + mx];
+        if (h < tile) continue;
+        let tallest = tile - 1;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+          const nx = mx + dx, ny = my + dy;
+          if (nx < 0 || ny < 0 || nx >= mods || ny >= mods) continue;
+          tallest = Math.max(tallest, top[ny * mods + nx]);
+        }
+        const limit = tallest + allowance;
+        if (h <= limit) continue;
+        for (let z = limit + 1; z <= h; z++) setModule(mx, my, z, 0);
+        cut++;
+      }
+    }
+    trimmed += cut;
+    if (!cut) break;
+  }
+  return trimmed;
+}
+
 function countSolid(g: VoxelGrid): number {
   let n = 0;
   for (const v of g.data) n += v;
@@ -350,10 +424,12 @@ function fillStragglers(
   for (let pass = 0; pass < 12; pass++) {
     const { label, anchored } = labelAnchored(g, tile);
     const lowest = new Map<number, { mx: number; my: number; z: number }>();
+    const size = new Map<number, number>();
     for (let i = 0; i < g.data.length; i++) {
       if (!g.data[i]) continue;
       const id = label[i];
       if (!id || anchored.has(id)) continue;
+      size.set(id, (size.get(id) ?? 0) + 1);
       const z = Math.floor(i / N);
       const cur = lowest.get(id);
       if (!cur || z < cur.z) {
@@ -366,7 +442,14 @@ function fillStragglers(
       }
     }
     if (!lowest.size) return filled;
-    for (const { mx, my, z } of lowest.values()) {
+    for (const [id, { mx, my, z }] of lowest) {
+      // A prop reaching a long way up to hold a scrap is itself a spike. Below
+      // a certain size the part is not worth a column that tall -- delete it
+      // and leave the tile carrying that module, as with the specks.
+      if ((size.get(id) ?? 0) < z * 2) {
+        for (let i = 0; i < g.data.length; i++) if (label[i] === id) g.data[i] = 0;
+        continue;
+      }
       for (let k = 0; k < z; k++) setModule(mx, my, k, 1);
       filled++;
     }

@@ -64,8 +64,12 @@ costs the code nothing: sharpening cells from 2.6 mm to 0.65 mm leaves pattern
 drift unchanged at about 1%. The module grid decides the sculpture's *outline*;
 its surface can be as smooth as the printer can hold.
 
-At full span the sculpture takes the whole data area — finder patterns
-included — with only the quiet zone left flat.
+The sculpture takes the whole data area by default — finder patterns included,
+only the quiet zone left flat. Confined to a centre square it reads as a lump
+dropped onto a flat pattern; spanning the lot, the code and the sculpture are
+one object. Blocky subjects clamp back a little, because a dense footprint
+fragments into more pieces and the bridges cost more error budget than the code
+can spare.
 
 ### Printing
 
