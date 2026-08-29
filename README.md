@@ -52,12 +52,31 @@ Whatever still floats gets exactly **one** column reaching the tile, not all of
 them. Filling every column — which is what grounding does — turns a canopy into
 a solid mass and costs a tree most of its shape; filling one gives it a trunk.
 
-### Resolution
+### Resolution, and printing
 
 Because x and y are the module grid, **the code's version is the sculpture's
-resolution**. A bigger code carries a finer sculpture; there is no separate
-detail axis to turn up. Only the vertical axis is free of the grid, so height
-can be subdivided for smoother profiles.
+resolution**. There is no separate detail axis to turn up — which makes raising
+the version very tempting, and that is exactly what produces something no FDM
+printer can hold. At 65 modules the tile had 143 single-module islands and 453
+pairs of modules touching only at a corner, with each module just 4 nozzle
+widths across.
+
+The resolution to that is not smaller modules but **a wider sculpture on a
+coarser code**. A span of 0.72 on a 41-module code gives a 30-module sculpture
+at 2.6 mm — 6.5 nozzle widths — against 36 modules at 1.6 mm on a 65-module one.
+Nearly the same sculpture, modules 60% wider, and the tile comes out about the
+same size either way, because the module count and the module size trade off
+against each other at a fixed footprint.
+
+The app reports this rather than deciding it: nozzle width, modules per nozzle
+pass, layer count, island and corner-contact counts, and a verdict, all
+recomputed as the controls move. The default settings land on the comfortable
+side of it.
+
+Bridges cost error-correction budget, which scales with the code's area while
+the bridges scale with the sculpture's. So the span is fitted the same way the
+rest of this is: ask for what was requested, and step back only if the decoder
+actually objects.
 
 ### The models
 
@@ -104,7 +123,7 @@ at bottom-right.
 
 **The camouflage is asserted, not assumed.** The suite compares what the print
 shows from overhead against the plain code and requires under 4% of modules to
-differ — in practice it is under 1%. It separately asserts that *no voxel
+differ — in practice it is 0.8–1.7%. It separately asserts that *no voxel
 anywhere stands over a light module*, which is the property the camouflage
 actually rests on, and that the image verified is the image printed.
 
@@ -114,6 +133,12 @@ at an edge or a corner are not a printable weld), with the supports adding under
 8% material. This caught three real modelling errors — a mushroom cap that only
 touched its stalk, a whale's flukes abutting rather than overlapping the
 peduncle, and a whale stand that stopped short of the body.
+
+**Printability is asserted at the defaults.** The suite requires the shipped
+settings to come out "comfortable", requires a fine-grained alternative to be
+flagged rather than silently shipped, and checks that a nozzle too coarse for
+the modules is caught. It also pins the trade itself: a coarse code must match a
+fine one for sculpture detail while the tile stays about the same size.
 
 **Finder patterns are matched in full, not sampled.** A QR carries them at
 top-left, top-right and bottom-left and never at bottom-right, which is what
@@ -203,7 +228,8 @@ skull gets its eye sockets.
 src/lib/
   sdf.ts          3D distance primitives, combinators, bounds-culled union
   models3d.ts     the sculptures, and the prompt matcher
-  carve.ts        carving, bridging, and minimal supports
+  carve.ts        carving, bridging, speck-dropping, minimal supports
+  printability.ts what an FDM printer will make of it
   voxelize.ts     lathe and lettering adapters for 2D input
   voxel.ts        voxel grids, projection, connectivity
   bitmap.ts       binary rasters, fitting, projection helpers

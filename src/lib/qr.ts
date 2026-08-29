@@ -33,9 +33,22 @@ export function makeQr(text: string, ecc: EccLevel = 'H', quietZone = 4, version
   if (!text) throw new Error('QR payload is empty');
   // typeNumber 0 asks the library to pick the smallest version that fits; an
   // explicit version forces a larger, finer grid than the payload needs.
-  const qr = qrcode((version ?? 0) as Parameters<typeof qrcode>[0], ecc);
-  qr.addData(text);
-  qr.make();
+  //
+  // A requested version is a floor, not a demand: a payload too long for it
+  // would otherwise throw, so a link the user pastes could break the app purely
+  // because the grid slider was left somewhere small.
+  const build = (v: number) => {
+    const qr = qrcode(v as Parameters<typeof qrcode>[0], ecc);
+    qr.addData(text);
+    qr.make();
+    return qr;
+  };
+  let qr;
+  try {
+    qr = build(version ?? 0);
+  } catch {
+    qr = build(0);
+  }
 
   const n = qr.getModuleCount();
   const size = n + quietZone * 2;

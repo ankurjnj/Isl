@@ -172,6 +172,8 @@ select.input { cursor: pointer; }
 .verdict.ok strong { color: var(--ok); }
 .verdict.bad { background: #2a1315; border-color: var(--bad); }
 .verdict.bad strong { color: var(--bad); }
+.verdict.warn { background: #2a2312; border-color: var(--warn); }
+.verdict.warn strong { color: var(--warn); }
 
 .stats {
   display: grid;

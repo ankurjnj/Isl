@@ -155,6 +155,64 @@ console.log('\n== 2D input becomes a printable solid ==');
     && design({ model: revolveSilhouette(gapped) }).verify.matches);
 }
 
+console.log('\n== the defaults are actually printable ==');
+{
+  // The code's module grid is the sculpture's resolution, so it is tempting to
+  // raise the version for detail -- which is exactly what made the tile too
+  // fine to print. The defaults must land on the comfortable side of that.
+  const d = design();
+  check('default settings are comfortable to print', d.print.verdict === 'comfortable',
+    `${d.print.modulePasses.toFixed(1)} nozzle widths per module, verdict "${d.print.verdict}"`);
+  check('and the sculpture is still worth looking at', d.report.spanModules >= 25,
+    `${d.report.spanModules} modules across`);
+
+  // The move that resolves the trade: a wider sculpture on a coarser code
+  // matches a fine code's detail at a far more printable module size.
+  const fine = design({ version: 12, span: 0.55, moduleMm: 1.6 });
+  check('a coarse code matches a fine one for sculpture detail',
+    d.report.spanModules >= fine.report.spanModules * 0.8,
+    `${d.report.spanModules} modules at ${d.print.modulePasses.toFixed(1)} passes ` +
+    `vs ${fine.report.spanModules} at ${fine.print.modulePasses.toFixed(1)}`);
+  check('and the fine one is flagged, not silently shipped', fine.print.verdict !== 'comfortable',
+    `verdict "${fine.print.verdict}"`);
+  check('while the tile stays about the same size either way',
+    Math.abs(d.dims.widthMm - fine.dims.widthMm) < 30,
+    `${d.dims.widthMm.toFixed(0)} mm vs ${fine.dims.widthMm.toFixed(0)} mm`);
+
+  // A nozzle the modules cannot resolve has to be caught.
+  const fat = design({ nozzleMm: 0.8 });
+  check('a nozzle too coarse for the modules is caught', fat.print.verdict !== 'comfortable',
+    `0.8 mm nozzle -> ${fat.print.modulePasses.toFixed(1)} passes, "${fat.print.verdict}"`);
+}
+
+console.log('\n== bridging pays only for what is worth keeping ==');
+{
+  // A fragment one or two modules across costs a darkened module to reach and
+  // adds almost nothing to the shape. Dropping those rather than bridging them
+  // roughly halves the pattern drift, and is safe: the tile still carries the
+  // module, so nothing is left loose.
+  const qr = makeQr(payload, 'H', 4, DEFAULT_INPUT.version);
+  const opts = { span: DEFAULT_INPUT.span, zSub: DEFAULT_INPUT.zSub, tileLayers: DEFAULT_INPUT.tileLayers };
+  const c = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, getModel('castle')!.sdf, opts);
+  check('specks are dropped rather than bridged', c.droppedSpecks > c.bridges * 0.5,
+    `${c.droppedSpecks} dropped vs ${c.bridges} bridged`);
+  const d = design({ model: getModel('castle')!.sdf });
+  check('which keeps the pattern close to the plain code', d.report.driftFraction < 0.025,
+    `${(d.report.driftFraction * 100).toFixed(1)}% drift`);
+  check('and it is still one piece that scans', d.report.looseParts === 1 && d.verify.matches);
+}
+
+console.log('\n== a payload too long for the chosen grid still works ==');
+{
+  // The code-grid control is a floor, not a demand. Forcing a version too small
+  // for the payload used to throw, so pasting a long link could break the app
+  // outright depending on where the slider happened to sit.
+  const long = 'https://a-considerably-longer-url.example.com/path/to/thing?with=query&and=more&plus=padding';
+  const d = design({ payload: long, version: 2 });
+  check('it grows the code instead of throwing', d.qr.version > 2 && d.verify.matches,
+    `asked v2, used v${d.qr.version}`);
+}
+
 console.log('\n== the mesh is a closed, correctly-wound solid ==');
 {
   const signedVolume = (m: { positions: Float32Array; triangleCount: number }) => {

@@ -37,8 +37,8 @@ const settled = () => page.waitForFunction(
 
 await page.goto(URL_, { waitUntil: 'load' });
 // Builds run in a worker, so wait for the result rather than a fixed delay.
-await page.locator('.verdict').waitFor({ timeout: 40000 });
-check('app reports the model scans', await page.locator('.verdict.ok').isVisible());
+await page.locator('.verdict.scan').waitFor({ timeout: 40000 });
+check('app reports the model scans', await page.locator('.verdict.scan.ok').isVisible());
 
 const PAYLOAD = 'https://example.com/scan-me-from-above';
 await page.fill('#payload', PAYLOAD);
@@ -224,7 +224,16 @@ check('rapid input is accepted without stalling', during.dispatched < 200,
   `six changes in ${during.dispatched.toFixed(0)} ms`);
 check('building does not stall the page beyond idle rendering', during.worst < idle * 2 + 200,
   `worst frame ${during.worst.toFixed(0)} ms building vs ${idle.toFixed(0)} ms idle (settled in ${during.settled.toFixed(0)} ms)`);
-check('and it settles to a valid design', await page.locator('.verdict.ok').isVisible());
+check('and it settles to a valid design', await page.locator('.verdict.scan.ok').isVisible());
+
+// Printability is a first-class result, not a footnote: the code's module grid
+// is also the sculpture's resolution, so it is easy to produce something
+// beautiful that no FDM printer can hold. The defaults must land on the right
+// side of that.
+const printVerdict = await page.locator('.verdict.print').innerText();
+check('the app reports the design as printable at the defaults',
+  await page.locator('.verdict.print.ok').isVisible(),
+  printVerdict.replace(/\n/g, ' · '));
 
 check('no page errors', errors.length === 0, errors.join(' | '));
 

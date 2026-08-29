@@ -38,6 +38,8 @@ export interface CarveResult {
   originModule: number;
   /** Light modules darkened to join fragments. Each is one module of error. */
   bridges: number;
+  /** Fragments too small to be worth a bridge, removed instead. */
+  droppedSpecks: number;
   /** Supports added under parts that reached nothing. One column each. */
   filledColumns: number;
   /** Voxels the filling added, against the carved total. */
@@ -165,6 +167,13 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
   for (let z = tile; z < h; z++) {
     for (let i = 0; i < w * d; i++) if (grid.data[z * w * d + i]) foot[i] = 1;
   }
+  // Drop specks before bridging. A fragment one or two modules across costs a
+  // darkened module to reach and contributes almost nothing to the shape, so
+  // paying pattern drift for it is a bad trade. Removing it is safe: the tile
+  // still carries that module, so nothing is left loose -- the sculpture simply
+  // has no material above it.
+  const dropped = dropSpecks(grid, foot, w, d, tile, h, 2);
+
   const allowed = new Uint8Array(w * d);
   for (let y = originModule; y < originModule + spanModules; y++) {
     for (let x = originModule; x < originModule + spanModules; x++) allowed[y * w + x] = 1;
@@ -207,11 +216,46 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
     code,
     spanModules,
     originModule,
+    droppedSpecks: dropped,
     bridges: bridges.length,
     filledColumns,
     fillFraction: before ? (after - before) / before : 0,
     looseParts: componentCount(grid),
   };
+}
+
+/**
+ * Remove footprint fragments of at most `maxModules`, clearing their sculpture
+ * voxels. Operates on the footprint so a whole speck goes at once, and updates
+ * it in place so the bridging that follows never sees them.
+ */
+function dropSpecks(
+  g: VoxelGrid, foot: Uint8Array, w: number, d: number, tile: number, h: number, maxModules: number,
+): number {
+  const seen = new Uint8Array(w * d);
+  const N = w * d;
+  let dropped = 0;
+  for (let s = 0; s < foot.length; s++) {
+    if (!foot[s] || seen[s]) continue;
+    const cells: number[] = [];
+    const stack = [s];
+    seen[s] = 1;
+    while (stack.length) {
+      const p = stack.pop()!;
+      cells.push(p);
+      const x = p % w, y = Math.floor(p / w);
+      for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < d - 1 ? p + w : -1]) {
+        if (q >= 0 && foot[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
+      }
+    }
+    if (cells.length > maxModules) continue;
+    for (const c of cells) {
+      foot[c] = 0;
+      for (let z = tile; z < h; z++) g.data[z * N + c] = 0;
+    }
+    dropped++;
+  }
+  return dropped;
 }
 
 function countSolid(g: VoxelGrid): number {

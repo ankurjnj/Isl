@@ -20,22 +20,12 @@ self.onmessage = (e: MessageEvent<BuildRequest>) => {
     const model = resolveSource(source);
     if (!model) throw new Error('unknown model');
     const design = buildDesign({ ...input, model });
-    // Strip what cannot cross the boundary, and hand the big buffers over
-    // rather than copying them.
-    const payload = {
-      id,
-      ok: true as const,
-      design: {
-        qr: design.qr,
-        grid: design.grid,
-        code: design.code,
-        meshes: design.meshes,
-        verify: design.verify,
-        dims: design.dims,
-        report: design.report,
-        warnings: design.warnings,
-      },
-    };
+    // Send the design whole rather than rebuilding it field by field. Listing
+    // the fields here meant every value added to a design had to be remembered
+    // in a second place, and one that was not simply arrived undefined in the
+    // UI. Everything in a design is plain data, so it clones as it is; the big
+    // buffers are handed over rather than copied.
+    const payload = { id, ok: true as const, design };
     const transfer: Transferable[] = [
       design.grid.data.buffer,
       design.code.data.buffer,

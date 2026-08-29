@@ -44,6 +44,7 @@ export default function App() {
   const [moduleMm, setModuleMm] = useState(DEFAULT_INPUT.moduleMm);
   const [layerMm, setLayerMm] = useState(DEFAULT_INPUT.layerMm);
   const [baseMm, setBaseMm] = useState(DEFAULT_INPUT.baseMm);
+  const [nozzleMm, setNozzleMm] = useState(DEFAULT_INPUT.nozzleMm);
   const [invert, setInvert] = useState(false);
   const [preset, setPreset] = useState<CameraPreset>('angle');
   const [showBase, setShowBase] = useState(true);
@@ -77,9 +78,9 @@ export default function App() {
   // itself forever and rebuild the design on a timer with no input at all.
   const inputs = useMemo<Omit<DesignInput, 'model'> | null>(
     () => (payload.trim()
-      ? { ...DEFAULT_INPUT, payload: payload.trim(), ecc, version, span, zSub, moduleMm, layerMm, baseMm }
+      ? { ...DEFAULT_INPUT, payload: payload.trim(), ecc, version, span, zSub, moduleMm, layerMm, baseMm, nozzleMm }
       : null),
-    [payload, ecc, version, span, zSub, moduleMm, layerMm, baseMm],
+    [payload, ecc, version, span, zSub, moduleMm, layerMm, baseMm, nozzleMm],
   );
   const settledInputs = useSettled(inputs);
   const settledSource = useSettled(source);
@@ -212,6 +213,14 @@ export default function App() {
           <Field label={`Base ${baseMm.toFixed(1)} mm`}>
             <input className="range" type="range" min={0} max={6} step={0.2} value={baseMm} onChange={(e) => setBaseMm(+e.target.value)} />
           </Field>
+          <Field label="Nozzle">
+            <select className="input" value={nozzleMm} onChange={(e) => setNozzleMm(+e.target.value)}>
+              <option value={0.2}>0.2 mm</option>
+              <option value={0.4}>0.4 mm</option>
+              <option value={0.6}>0.6 mm</option>
+              <option value={0.8}>0.8 mm</option>
+            </select>
+          </Field>
         </section>
 
         {(error ?? buildError) && <div className="alert bad">{error ?? buildError}</div>}
@@ -220,7 +229,7 @@ export default function App() {
         {design && (
           <>
             <section>
-              <div className={'verdict ' + (design.verify.matches ? 'ok' : 'bad')}>
+              <div className={'verdict scan ' + (design.verify.matches ? 'ok' : 'bad')}>
                 <strong>{design.verify.matches ? 'Scans correctly' : 'Does not scan'}</strong>
                 <span>
                   {design.verify.matches
@@ -241,6 +250,18 @@ export default function App() {
                 <Stat k="Pieces" v={`${design.report.looseParts}`} />
                 <Stat k="Triangles" v={`${design.report.triangles.toLocaleString()}`} />
               </dl>
+
+              <div className={'verdict print ' + (design.print.verdict === 'comfortable' ? 'ok' : design.print.verdict === 'tight' ? 'warn' : 'bad')}>
+                <strong>
+                  {design.print.verdict === 'comfortable' ? 'Comfortable to print'
+                    : design.print.verdict === 'tight' ? 'Tight to print' : 'Too fine to print'}
+                </strong>
+                <span>
+                  {design.print.modulePasses.toFixed(1)} nozzle widths per module ·{' '}
+                  {design.print.layers} layers · {design.print.isolatedModules} single-module islands ·{' '}
+                  {design.print.cornerContacts} corner-touching pairs
+                </span>
+              </div>
 
               {design.warnings.map((w, i) => (
                 <div key={i} className="alert warn">{w}</div>

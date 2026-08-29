@@ -6,6 +6,7 @@ import { countOverhangs, VoxelGrid } from './voxel';
 import { meshToObj, meshToStl } from './stl';
 import { verifyTopView, VerifyResult } from './verify';
 import { Sdf } from './sdf';
+import { checkPrintability, PrintCheck } from './printability';
 
 export interface DesignInput {
   payload: string;
@@ -23,6 +24,8 @@ export interface DesignInput {
   moduleMm: number;
   layerMm: number;
   baseMm: number;
+  /** Printer nozzle, for the printability check. */
+  nozzleMm: number;
 }
 
 export interface Dimensions {
@@ -36,6 +39,8 @@ export interface DesignReport {
   moduleCount: number;
   /** Modules the sculpture spans. Its resolution, since x and y are the grid. */
   spanModules: number;
+  /** True when the sculpture was cut back to keep the code readable. */
+  spanClamped: boolean;
   /** Light modules darkened to join the sculpture. Each is one module of error. */
   bridges: number;
   /** How far the top view departs from the plain code. */
@@ -58,6 +63,7 @@ export interface DesignView {
   verify: VerifyResult;
   dims: Dimensions;
   report: DesignReport;
+  print: PrintCheck;
   warnings: string[];
 }
 
@@ -66,27 +72,52 @@ export type Design = DesignView;
 export const DEFAULT_INPUT: Omit<DesignInput, 'model' | 'payload'> = {
   ecc: 'H',
   quietZone: 4,
-  version: 12,
-  span: 0.55,
+  // Deliberately coarse. The code's module grid is the sculpture's resolution,
+  // so it is tempting to raise the version -- but a wide span on a small code
+  // gives the same sculpture with far bigger modules, and the tile comes out
+  // the same size either way. A 41-module code at 2.6 mm is 6.5 nozzle widths
+  // per module; the 65-module code it replaces was 4.0 and printed poorly.
+  version: 6,
+  span: 0.72,
   zSub: 2,
   tileLayers: 2,
-  moduleMm: 1.6,
-  layerMm: 0.8,
+  moduleMm: 2.6,
+  layerMm: 0.6,
   baseMm: 1.6,
+  nozzleMm: 0.4,
 };
 
 export function buildDesign(input: DesignInput): Design {
   const qr = makeQr(input.payload, input.ecc, input.quietZone, input.version || undefined);
 
-  const carved = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, input.model, {
-    span: input.span,
-    zSub: input.zSub,
-    tileLayers: input.tileLayers,
-  });
+  // Fit the sculpture to the code's error budget.
+  //
+  // Bridges scale with the sculpture's area while the budget scales with the
+  // code's, so a wide sculpture on a coarse code can need more darkened modules
+  // than the code can absorb -- and a blocky subject needs the most, because a
+  // dense footprint fragments into more pieces than a slender one. Rather than
+  // capping the span by a rule that would be wrong for half the library, ask
+  // for what was requested and step back only if the decoder actually objects.
+  const attempt = (span: number) => {
+    const carved = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, input.model, {
+      span, zSub: input.zSub, tileLayers: input.tileLayers,
+    });
+    // The code a scanner reads is the one with the bridges in it, so that is
+    // what gets verified -- not the pristine code we started from.
+    return { carved, verify: verifyTopView(carved.code, input.payload) };
+  };
 
-  // The code a scanner reads is the one with the bridges in it, so that is what
-  // gets verified -- not the pristine code we started from.
-  const verify = verifyTopView(carved.code, input.payload);
+  let best = attempt(input.span);
+  if (!best.verify.matches) {
+    let lo = 0.2, hi = input.span;
+    for (let i = 0; i < 4 && !best.verify.matches; i++) {
+      const mid = (lo + hi) / 2;
+      const tryMid = attempt(mid);
+      if (tryMid.verify.matches) { best = tryMid; lo = mid; } else hi = mid;
+    }
+    if (!best.verify.matches) best = attempt(lo);
+  }
+  const { carved, verify } = best;
 
   const meshed = meshSculpture(carved.grid, {
     moduleMm: input.moduleMm, layerMm: input.layerMm, baseMm: input.baseMm,
@@ -108,6 +139,7 @@ export function buildDesign(input: DesignInput): Design {
   const report: DesignReport = {
     moduleCount: qr.moduleCount,
     spanModules: carved.spanModules,
+    spanClamped: carved.spanModules < Math.round(qr.moduleCount * input.span),
     bridges: carved.bridges,
     driftFraction: drift / (qr.moduleCount * qr.moduleCount),
     supports: carved.filledColumns,
@@ -117,19 +149,23 @@ export function buildDesign(input: DesignInput): Design {
     triangles: meshed.body.triangleCount + meshed.base.triangleCount,
   };
 
+  const print = checkPrintability(carved.code, carved.grid, {
+    moduleMm: input.moduleMm, layerMm: input.layerMm, baseMm: input.baseMm, nozzleMm: input.nozzleMm,
+  });
+
   return {
     qr, grid: carved.grid, code: carved.code,
     meshes: { body: meshed.body, base: meshed.base },
-    verify, dims, report,
-    warnings: collectWarnings(input, report, verify, dims),
+    verify, dims, report, print,
+    warnings: collectWarnings(input, report, verify, dims, print),
   };
 }
 
 /** Practical checks a slicer will not make for you. */
 function collectWarnings(
-  input: DesignInput, report: DesignReport, verify: VerifyResult, dims: Dimensions,
+  input: DesignInput, report: DesignReport, verify: VerifyResult, dims: Dimensions, print: PrintCheck,
 ): string[] {
-  const w: string[] = [];
+  const w: string[] = [...print.notes];
   if (!verify.matches) {
     w.push(
       verify.decoded
@@ -138,10 +174,11 @@ function collectWarnings(
           'Shrink it, or raise the code version for more room.',
     );
   }
-  // 1.2 mm is the widely cited floor for a printed module to survive nozzle
-  // width and elephant-foot squish and still read on a phone.
-  if (input.moduleMm < 1.2) {
-    w.push(`Modules are ${input.moduleMm} mm. Below about 1.2 mm a printed code usually stops scanning.`);
+  if (print.verdict !== 'comfortable') {
+    w.push(
+      'A coarser code prints far better and costs almost no sculpture detail: widen the sculpture instead ' +
+      'of raising the code version, since the tile comes out the same size either way.',
+    );
   }
   if (report.looseParts > 1) {
     w.push(`The sculpture is in ${report.looseParts} disconnected pieces and will not print as one object.`);
@@ -152,7 +189,13 @@ function collectWarnings(
       'floating well clear of anything beneath them, and they are being propped up to the tile.',
     );
   }
-  if (report.driftFraction > 0.04) {
+  if (report.spanClamped) {
+    w.push(
+      `The sculpture was reduced to ${report.spanModules} modules — any wider and joining its fragments ` +
+      'costs more darkened modules than this code can absorb. A larger code version would allow more.',
+    );
+  }
+  if (report.driftFraction > 0.05) {
     w.push(
       `${(report.driftFraction * 100).toFixed(1)}% of the code was darkened to hold the sculpture together. ` +
       'It still scans, but a smaller sculpture or a larger code would leave the pattern cleaner.',
@@ -182,7 +225,8 @@ export function printingNotes(input: Omit<DesignInput, 'model'>, design: DesignV
     design.report.overhangs === 0
       ? 'No supports needed: nothing overhangs.'
       : `Enable supports (${design.report.overhangs} overhanging voxels). They only touch the sculpture; the code tile needs none.`,
-    `Modules are ${input.moduleMm} mm and layers ${input.layerMm} mm, so use a layer height that divides ${input.layerMm} mm evenly.`,
+    `Modules are ${input.moduleMm} mm — ${design.print.modulePasses.toFixed(1)} passes of a ${input.nozzleMm} mm nozzle. Layers are ${input.layerMm} mm, so pick a layer height that divides it evenly.`,
+    `${design.print.layers} layers, with ${design.print.isolatedModules} single-module islands on the plate — none of them load-bearing, since every one is fused to the base.`,
     `${design.dims.widthMm.toFixed(0)} × ${design.dims.depthMm.toFixed(0)} mm tile, ${design.dims.heightMm.toFixed(0)} mm tall, sculpture ${design.dims.figureMm.toFixed(0)} mm across.`,
     'Matte filament scans far better than glossy — specular highlights are what usually defeat a scanner on a printed code.',
     'Scan straight down, with diffuse light. From above it is a code; from anywhere else it is the sculpture.',
