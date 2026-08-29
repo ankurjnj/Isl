@@ -358,3 +358,42 @@ export function project(g: VoxelGrid): { topAchieved: Bitmap; sideAchieved: Bitm
   return { topAchieved, sideAchieved };
 }
 
+
+/**
+ * Split the solid into the skin you can see from above and everything under it.
+ *
+ * A print in one colour hides its own shape: the sculpture reads as a dark mass
+ * where the form is lost in shadow, and the code reads only by relief. Making
+ * the body light and coating only what faces the sky gives both -- the
+ * sculpture's form in a light filament, and a crisp black QR from overhead,
+ * which is what makes it scan like a printed code rather than by shadow.
+ *
+ * What is visible from above is exactly the topmost run of each column, so that
+ * is the skin: it follows the surface rather than sitting at one height, which
+ * is why this is a second body rather than a filament change at a layer. Both
+ * halves are ordinary voxel sets, so both mesh into closed solids.
+ */
+export function splitTopSkin(g: VoxelGrid, layers: number): { skin: VoxelGrid; core: VoxelGrid } {
+  const N = g.w * g.d;
+  const skin: VoxelGrid = { w: g.w, d: g.d, h: g.h, data: new Uint8Array(g.data.length) };
+  const core: VoxelGrid = { w: g.w, d: g.d, h: g.h, data: new Uint8Array(g.data) };
+  if (layers <= 0) return { skin, core };
+  for (let y = 0; y < g.d; y++) {
+    for (let x = 0; x < g.w; x++) {
+      let top = -1;
+      for (let z = g.h - 1; z >= 0; z--) {
+        if (g.data[z * N + y * g.w + x]) { top = z; break; }
+      }
+      if (top < 0) continue;
+      for (let k = 0; k < layers; k++) {
+        const z = top - k;
+        // Stop at the first gap: below it is enclosed, and coating the inside
+        // of a hollow would spend the second colour where no one can see it.
+        if (z < 0 || !g.data[z * N + y * g.w + x]) break;
+        skin.data[z * N + y * g.w + x] = 1;
+        core.data[z * N + y * g.w + x] = 0;
+      }
+    }
+  }
+  return { skin, core };
+}

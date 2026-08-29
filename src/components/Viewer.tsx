@@ -134,13 +134,20 @@ export default function Viewer({ design, preset, showBase }: Props) {
       return new THREE.Mesh(g, material);
     };
 
-    // Deep matte for the code, near-white for the plate: the same contrast the
-    // print needs, so the preview does not flatter a design that will not scan.
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x191c22, roughness: 0.9, metalness: 0.02 });
-    const baseMat = new THREE.MeshStandardMaterial({ color: 0xeef1f6, roughness: 0.85, metalness: 0.0 });
+    // The same contrast the print needs, so the preview never flatters a design
+    // that will not scan.
+    //
+    // With a top coat the body turns light and only the skin is dark, which is
+    // both what the two filaments do and the reason to want them: a sculpture
+    // printed entirely dark loses its own form to shadow.
+    const coated = design.meshes.cap.triangleCount > 0;
+    const dark = () => new THREE.MeshStandardMaterial({ color: 0x14161b, roughness: 0.92, metalness: 0.02 });
+    const light = () => new THREE.MeshStandardMaterial({ color: 0xe9edf4, roughness: 0.85, metalness: 0.0 });
 
-    group.add(make(design.meshes.body.positions, design.meshes.body.normals, bodyMat));
-    if (showBase) group.add(make(design.meshes.base.positions, design.meshes.base.normals, baseMat));
+    group.add(make(design.meshes.body.positions, design.meshes.body.normals,
+      coated ? light() : dark()));
+    if (coated) group.add(make(design.meshes.cap.positions, design.meshes.cap.normals, dark()));
+    if (showBase) group.add(make(design.meshes.base.positions, design.meshes.base.normals, light()));
 
     const { widthMm, depthMm, heightMm } = design.dims;
     group.position.set(-widthMm / 2, -depthMm / 2, -heightMm / 2);

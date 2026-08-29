@@ -3,7 +3,7 @@ import { EXAMPLES, composeRecipe, parsePrompt, sculpt } from '../src/lib/compose
 import { carveSculpture } from '../src/lib/carve';
 import { buildDesign, DEFAULT_INPUT, exportStl } from '../src/lib/pipeline';
 import { concatMeshes, meshSculpture } from '../src/lib/mesh';
-import { buildFigure, countComponents } from '../src/lib/voxel';
+import { buildFigure, countComponents, splitTopSkin } from '../src/lib/voxel';
 import { flipY, makeBitmap } from '../src/lib/bitmap';
 import { extrudeSilhouette, revolveSilhouette } from '../src/lib/voxelize';
 
@@ -399,6 +399,59 @@ console.log('\n== the sculpture takes the whole code, and leaves no needles ==')
   check('and the code still reads', d.verify.matches && d.report.looseParts === 1);
 }
 
+console.log('\n== the two-tone split is the surface you can see from above ==');
+{
+  const d = design({ topCoatMm: 1.2 });
+  check('a skin is produced', d.report.coatLayers === 2 && d.meshes.cap.triangleCount > 0,
+    `${d.report.coatLayers} layers, ${d.meshes.cap.triangleCount} triangles`);
+
+  // The whole point: from overhead you see the dark skin and nothing else, so
+  // every column that has material at all must have skin on top of it.
+  const { skin, core } = splitTopSkin(d.grid, 2);
+  const N = d.grid.w * d.grid.d;
+  let columns = 0, topped = 0, overlap = 0;
+  for (let y = 0; y < d.grid.d; y++) {
+    for (let x = 0; x < d.grid.w; x++) {
+      let top = -1;
+      for (let z = d.grid.h - 1; z >= 0; z--) {
+        if (d.grid.data[z * N + y * d.grid.w + x]) { top = z; break; }
+      }
+      if (top < 0) continue;
+      columns++;
+      if (skin.data[top * N + y * d.grid.w + x]) topped++;
+      for (let z = 0; z < d.grid.h; z++) {
+        const i = z * N + y * d.grid.w + x;
+        if (skin.data[i] && core.data[i]) overlap++;
+      }
+    }
+  }
+  check('every visible column is capped', columns > 0 && topped === columns,
+    `${topped} of ${columns}`);
+  check('the two halves do not overlap', overlap === 0, `${overlap} shared cells`);
+
+  // Together they must still be the original solid: the split may not lose or
+  // invent material, or the print comes out a different shape than the preview.
+  let same = true, before = 0, after = 0;
+  for (let i = 0; i < d.grid.data.length; i++) {
+    before += d.grid.data[i];
+    after += skin.data[i] | core.data[i];
+    if (d.grid.data[i] !== (skin.data[i] | core.data[i])) same = false;
+  }
+  check('skin plus core is the whole solid', same, `${before} vs ${after} cells`);
+
+  // A hollow's inside is not visible, and coating it would spend the second
+  // colour where no one can see it.
+  const deep = splitTopSkin(d.grid, 400);
+  let coatedAll = 0; for (const v of deep.skin.data) coatedAll += v;
+  check('a deep coat still stops at the first gap', coatedAll < before,
+    `${coatedAll} of ${before} cells coated at 400 layers`);
+
+  const off = design({ topCoatMm: 0 });
+  check('and it can be turned off',
+    off.report.coatLayers === 0 && off.meshes.cap.triangleCount === 0
+    && off.verify.matches && off.report.triangles < d.report.triangles);
+}
+
 console.log('\n== the mesh is a closed, correctly-wound solid ==');
 {
   const signedVolume = (m: { positions: Float32Array; triangleCount: number }) => {
@@ -431,7 +484,8 @@ console.log('\n== STL export ==');
   const stl = exportStl(d, 'test');
   const n = new DataView(stl).getUint32(80, true);
   check('stl size matches header', stl.byteLength === 84 + n * 50, `${(stl.byteLength / 1024).toFixed(0)} KB, ${n} tris`);
-  check('stl carries body and base', n === d.meshes.body.triangleCount + d.meshes.base.triangleCount);
+  check('stl carries every part', n === d.report.triangles,
+    `${n} vs ${d.report.triangles}`);
   check('no NaN in positions', concatMeshes(d.meshes.body, d.meshes.base).positions.every(Number.isFinite));
 }
 

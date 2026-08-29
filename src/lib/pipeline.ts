@@ -1,8 +1,8 @@
 import { Bitmap } from './bitmap';
 import { EccLevel, makeQr, QrResult } from './qr';
 import { concatMeshes, meshSculpture, Mesh } from './mesh';
-import { carveSculpture } from './carve';
-import { countOverhangs, VoxelGrid } from './voxel';
+import { carveSculpture, modelAspect } from './carve';
+import { countOverhangs, splitTopSkin, VoxelGrid } from './voxel';
 import { meshToObj, meshToStl } from './stl';
 import { verifyTopView, VerifyResult } from './verify';
 import { Sdf } from './sdf';
@@ -28,6 +28,15 @@ export interface DesignInput {
   moduleMm: number;
   layerMm: number;
   baseMm: number;
+  /**
+   * Thickness of the dark skin over everything facing the sky, in mm.
+   *
+   * Zero prints the whole sculpture in one colour, where the code reads only by
+   * relief. Anything above that coats the visible surface, so the print carries
+   * a real black-on-light QR and the sculpture's own form stays legible in the
+   * lighter filament instead of being lost in a dark mass.
+   */
+  topCoatMm: number;
   /** Printer nozzle, for the printability check. */
   nozzleMm: number;
 }
@@ -63,6 +72,8 @@ export interface DesignReport {
   looseParts: number;
   overhangs: number;
   triangles: number;
+  /** Layers of dark skin over the visible surface. 0 = a single-colour print. */
+  coatLayers: number;
 }
 
 export interface DesignView {
@@ -70,7 +81,7 @@ export interface DesignView {
   grid: VoxelGrid;
   /** The code as a scanner sees it. Unmodified. */
   code: Bitmap;
-  meshes: { body: Mesh; base: Mesh };
+  meshes: { body: Mesh; base: Mesh; cap: Mesh };
   verify: VerifyResult;
   dims: Dimensions;
   report: DesignReport;
@@ -104,6 +115,10 @@ export const DEFAULT_INPUT: Omit<DesignInput, 'model' | 'payload'> = {
   moduleMm: 2.6,
   layerMm: 0.6,
   baseMm: 1.6,
+  // Two layers at the default layer height: enough to survive a stray scrape
+  // and to read as solid black from above, without spending filament on a
+  // thickness no one can see.
+  topCoatMm: 1.2,
   nozzleMm: 0.4,
 };
 
@@ -118,9 +133,10 @@ export function buildDesign(input: DesignInput): Design {
   // four bytes each on top. Left unbounded the build simply never returns and
   // the UI waits forever. Detail gives way rather than size or code version,
   // because those two are what the user is actually choosing between.
+  const aspect = modelAspect(input.model);
   const gridCells = (sub: number) => {
     const across = (qr.moduleCount + input.quietZone * 2) * sub;
-    const tall = Math.max(4, Math.round(qr.moduleCount * input.span * 1.4 * sub)) + input.tileLayers;
+    const tall = Math.max(4, Math.round(qr.moduleCount * input.span * aspect * sub)) + input.tileLayers;
     return across * across * tall;
   };
   const CELL_BUDGET = 5e6;
@@ -140,10 +156,17 @@ export function buildDesign(input: DesignInput): Design {
 
   // The grid is finer than the code, so a cell is a fraction of a module.
   const cellMm = input.moduleMm / carved.xySub;
-  const meshed = meshSculpture(carved.grid, {
+  const meshOpts = {
     moduleMm: cellMm, layerMm: input.layerMm, baseMm: input.baseMm,
-    origin: [0, 0, input.baseMm], withBase: true,
-  });
+    origin: [0, 0, input.baseMm] as [number, number, number],
+  };
+  const coatLayers = input.topCoatMm > 0
+    ? Math.max(1, Math.round(input.topCoatMm / input.layerMm)) : 0;
+  const { skin, core } = splitTopSkin(carved.grid, coatLayers);
+  const meshed = meshSculpture(coatLayers ? core : carved.grid, { ...meshOpts, withBase: true });
+  const cap = coatLayers
+    ? meshSculpture(skin, { ...meshOpts, withBase: false }).body
+    : { positions: new Float32Array(0), normals: new Float32Array(0), triangleCount: 0 };
 
   const dims: Dimensions = {
     widthMm: carved.grid.w * cellMm,
@@ -166,7 +189,8 @@ export function buildDesign(input: DesignInput): Design {
     fillFraction: carved.fillFraction,
     looseParts: carved.looseParts,
     overhangs: countOverhangs(carved.grid),
-    triangles: meshed.body.triangleCount + meshed.base.triangleCount,
+    triangles: meshed.body.triangleCount + meshed.base.triangleCount + cap.triangleCount,
+    coatLayers,
   };
 
   const print = checkPrintability(carved.code, carved.grid, {
@@ -176,7 +200,7 @@ export function buildDesign(input: DesignInput): Design {
 
   return {
     qr, grid: carved.grid, code: carved.code,
-    meshes: { body: meshed.body, base: meshed.base },
+    meshes: { body: meshed.body, base: meshed.base, cap },
     verify, dims, report, print,
     warnings: collectWarnings(input, report, verify, dims, print),
   };
@@ -235,16 +259,36 @@ function collectWarnings(
 }
 
 export function exportStl(design: DesignView, name: string): ArrayBuffer {
-  return meshToStl(concatMeshes(design.meshes.body, design.meshes.base), name);
+  return meshToStl(concatMeshes(design.meshes.body, design.meshes.cap, design.meshes.base), name);
+}
+
+/**
+ * The two colours as separate files, for a printer that can change filament.
+ *
+ * Both are written in the same coordinate space, so a slicer's "load as a
+ * single object" or "align to first part" places them without any fitting --
+ * the light file and the dark file interlock exactly as they were split.
+ */
+export function exportStlParts(design: DesignView, name: string): { light: ArrayBuffer; dark: ArrayBuffer } {
+  return {
+    light: meshToStl(concatMeshes(design.meshes.body, design.meshes.base), `${name}-light`),
+    dark: meshToStl(design.meshes.cap, `${name}-dark`),
+  };
 }
 
 export function exportObj(design: DesignView): string {
-  return meshToObj(concatMeshes(design.meshes.body, design.meshes.base));
+  return meshToObj(concatMeshes(design.meshes.body, design.meshes.cap, design.meshes.base));
 }
 
 export function printingNotes(input: Omit<DesignInput, 'model'>, design: DesignView): string[] {
+  const coated = design.report.coatLayers > 0;
   return [
-    `Insert a filament change at Z = ${input.baseMm.toFixed(2)} mm. Below it is the base plate — use a light colour. Above it is the code and the sculpture — use a dark, matte colour.`,
+    coated
+      ? `Two bodies, same coordinates: download the pair and load them together. The light file is the plate and the sculpture; the dark file is the ${design.report.coatLayers}-layer skin over everything facing up. Assign a matte dark filament to the dark file and a light one to the rest.`
+      : `Insert a filament change at Z = ${input.baseMm.toFixed(2)} mm. Below it is the base plate — use a light colour. Above it is the code and the sculpture — use a dark, matte colour.`,
+    ...(coated
+      ? ['No multi-material printer? Print the whole thing in the light filament and roll dark ink across the top with a brayer or an ink pad. The skin is exactly the surface a roller touches, so the result is the same code — that is what the split is measuring.']
+      : []),
     design.report.overhangs === 0
       ? 'No supports needed: nothing overhangs steeper than 45°.'
       : `Enable supports (${design.report.overhangs} cells steeper than 45°). They only touch the sculpture; the code tile needs none.`,

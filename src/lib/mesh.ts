@@ -22,18 +22,26 @@ export interface Mesh {
 }
 
 /**
- * The two printed volumes, kept apart.
+ * The printed volumes, kept apart.
  *
  * They are separate because they must be *printed* separately: the contrast a
- * scanner needs comes from the base being a different colour to the body, via
- * a filament change at the base height. Splitting them here means the viewer
- * can show that contrast and the slicer gets an unambiguous colour boundary.
+ * scanner needs comes from one being a different colour to the other. Splitting
+ * them here means the viewer can show that contrast and the slicer gets an
+ * unambiguous colour boundary.
  */
 export interface SculptureMesh {
-  /** The sculpture and the code. Printed in the dark colour. */
+  /** The sculpture and the code, below any top coat. */
   body: Mesh;
   /** The plate everything stands on. Printed in the light colour. */
   base: Mesh;
+  /**
+   * The skin facing the sky, when a top coat was asked for.
+   *
+   * Empty otherwise. Its boundary follows the surface rather than sitting at
+   * one height, so a slicer needs it as a second body -- a filament change at a
+   * layer cannot express it.
+   */
+  cap: Mesh;
 }
 
 function drain(s: Sink): Mesh {
@@ -189,5 +197,5 @@ export function meshSculpture(grid: VoxelGrid, opts: MeshOptions): SculptureMesh
   }
   const base = drain(s);
 
-  return { body, base };
+  return { body, base, cap: drain(s) };
 }

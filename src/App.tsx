@@ -5,7 +5,7 @@ import ModelThumb from './components/ModelThumb';
 import { Bitmap } from './lib/bitmap';
 import { project } from './lib/voxel';
 import { EXAMPLES, composeRecipe, parsePrompt, type Recipe } from './lib/compose';
-import { DEFAULT_INPUT, exportObj, exportStl, printingNotes, type DesignInput } from './lib/pipeline';
+import { DEFAULT_INPUT, exportObj, exportStl, exportStlParts, printingNotes, type DesignInput } from './lib/pipeline';
 import { useDesign, type WorkerDesign } from './useDesign';
 import type { ModelSource } from './lib/source';
 import { downloadBlob, imageFileToBitmap, slugify, textToBitmap } from './lib/browser';
@@ -47,6 +47,7 @@ export default function App() {
   const [baseMm, setBaseMm] = useState(DEFAULT_INPUT.baseMm);
   const [nozzleMm, setNozzleMm] = useState(DEFAULT_INPUT.nozzleMm);
   const [selfSupport, setSelfSupport] = useState(DEFAULT_INPUT.selfSupport);
+  const [topCoatMm, setTopCoatMm] = useState(DEFAULT_INPUT.topCoatMm);
   const [invert, setInvert] = useState(false);
   const [preset, setPreset] = useState<CameraPreset>('angle');
   const [showBase, setShowBase] = useState(true);
@@ -93,9 +94,9 @@ export default function App() {
       // One control drives both axes: shaping the sculpture finely across but
       // coarsely up its height reads as smeared, not detailed.
       ? { ...DEFAULT_INPUT, payload: payload.trim(), ecc, version, span, xySub: detail, zSub: detail,
-          moduleMm, layerMm, baseMm, nozzleMm, selfSupport }
+          moduleMm, layerMm, baseMm, nozzleMm, selfSupport, topCoatMm }
       : null),
-    [payload, ecc, version, span, detail, moduleMm, layerMm, baseMm, nozzleMm, selfSupport],
+    [payload, ecc, version, span, detail, moduleMm, layerMm, baseMm, nozzleMm, selfSupport, topCoatMm],
   );
   const settledInputs = useSettled(inputs);
   const settledSource = useSettled(source);
@@ -212,6 +213,32 @@ export default function App() {
           </p>
         </section>
 
+        <section>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={topCoatMm > 0}
+              onChange={(e) => setTopCoatMm(e.target.checked ? DEFAULT_INPUT.topCoatMm : 0)}
+            />
+            Two-tone — dark skin on top, light body
+          </label>
+          <p className="hint">
+            {topCoatMm > 0
+              ? `Coats every surface facing up in ${topCoatMm.toFixed(1)} mm of dark filament${
+                design ? ` (${design.report.coatLayers} layer${design.report.coatLayers === 1 ? '' : 's'})` : ''
+              }, so the print carries a real black-on-white QR instead of reading only by relief — and the sculpture keeps its form in the lighter colour instead of vanishing into a dark mass. The boundary follows the surface, so it needs a printer that can change filament mid-layer, or a roller of ink over the finished print.`
+              : 'One colour throughout. The code still reads, but by relief and shadow rather than by contrast.'}
+          </p>
+          {topCoatMm > 0 && (
+            <Field label={`Skin thickness — ${topCoatMm.toFixed(1)} mm`}>
+              <input
+                className="range" type="range" min={0.3} max={3} step={0.1}
+                value={topCoatMm} onChange={(e) => setTopCoatMm(+e.target.value)}
+              />
+            </Field>
+          )}
+        </section>
+
         <section className="grid2">
           <Field label={`Sculpture size — ${design ? `${design.report.spanModules} of ${design.report.moduleCount} modules` : `${(span * 100).toFixed(0)}%`}`}>
             <input className="range" type="range" min={0.2} max={1} step={0.01} value={span} onChange={(e) => setSpan(+e.target.value)} />
@@ -308,6 +335,20 @@ export default function App() {
               >
                 Download STL
               </button>
+              {design.report.coatLayers > 0 && (
+                <button
+                  className="btn ghost"
+                  type="button"
+                  disabled={!design.verify.matches}
+                  onClick={() => {
+                    const parts = exportStlParts(design, name);
+                    void save(parts.light, `${name}-light.stl`, 'model/stl');
+                    void save(parts.dark, `${name}-dark.stl`, 'model/stl');
+                  }}
+                >
+                  Two STLs
+                </button>
+              )}
               <button
                 className="btn ghost"
                 type="button"

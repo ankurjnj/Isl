@@ -326,6 +326,19 @@ function relief(mx: number, my: number): number {
 }
 
 /**
+ * How tall the model stands, in multiples of its own footprint.
+ *
+ * The build's cell budget needs this before it can decide how finely to shape:
+ * cells scale with the sculpture's height, and a cat in a pointed hat is twice
+ * the height of a car over the same footprint. Assuming one figure for all of
+ * them let the tall ones through unbounded.
+ */
+export function modelAspect(model: Sdf): number {
+  const fit = fitFootprint(model);
+  return Math.max(0.2, (fit.z1 - fit.z0) * Math.sqrt(fit.sx * fit.sy));
+}
+
+/**
  * Measure the model's silhouette and fit it to the code square.
  *
  * Sampled coarsely -- a few tens of thousands of field evaluations against the

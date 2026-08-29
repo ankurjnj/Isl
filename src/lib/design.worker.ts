@@ -30,7 +30,8 @@ self.onmessage = (e: MessageEvent<BuildRequest>) => {
       design.grid.data.buffer,
       design.code.data.buffer,
       design.qr.bitmap.data.buffer,
-      ...[design.meshes.body, design.meshes.base].flatMap((m) => [m.positions.buffer, m.normals.buffer]),
+      ...[design.meshes.body, design.meshes.base, design.meshes.cap]
+        .flatMap((m) => [m.positions.buffer, m.normals.buffer]),
     ];
     (self as unknown as Worker).postMessage(payload, transfer);
   } catch (err) {

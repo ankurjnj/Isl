@@ -84,6 +84,30 @@ quiet zone left flat. Confined to a centre square it reads as a lump dropped
 onto a flat pattern; spanning the lot, the code and the sculpture are one
 object.
 
+### Two-tone: a code you can actually scan
+
+A print in one colour hides its own shape. The sculpture comes out a dark mass
+with its form lost in shadow, and the code reads only by relief — you have to
+light it right and hold it square before a phone will see it.
+
+So the body can be printed light and only the skin facing the sky dark. From
+overhead that is a real black-on-white QR; from anywhere else the sculpture's
+form is legible in the lighter filament.
+
+What is visible from above is exactly the topmost run of each column, so that
+is what the skin is. It follows the surface rather than sitting at one height,
+which is why it is a second body in the export rather than a filament change at
+a layer — no single Z can express it. Both halves are ordinary voxel sets, so
+both mesh into closed solids, and the suite asserts that every visible column is
+capped, that the two never overlap, and that together they are still exactly the
+original solid.
+
+It costs about 200 ms and a second mesh pass. Two STLs come out in the same
+coordinate space, so a slicer aligns them without any fitting. And if you have
+one filament: print it all light and roll dark ink over the top with a brayer.
+The skin is precisely the surface a roller touches — that equivalence is what
+the split is measuring.
+
 ### Printing
 
 Raising the code version is tempting, and it is exactly what produces something
@@ -312,7 +336,7 @@ src/lib/
   qr.ts           QR module matrix, quiet zone included
   path.ts         SVG path parser and bezier flattener
   raster.ts       supersampled scanline polygon fill; image thresholding
-  mesh.ts         greedy quad meshing and the base plate
+  mesh.ts         greedy quad meshing, base plate, two-tone split
   stl.ts          binary STL and OBJ
   verify.ts       decodes the model's own top-down projection
   pipeline.ts     input -> design, with warnings and printing notes
