@@ -22,6 +22,8 @@ export interface PrintCheck {
    * the count that rises fastest as modules shrink.
    */
   cornerContacts: number;
+  /** The sculpture's surface detail, in nozzle widths. Finer than a module. */
+  cellPasses: number;
   /** Total layers at the given layer height. */
   layers: number;
   widthMm: number;
@@ -33,7 +35,7 @@ export interface PrintCheck {
 export function checkPrintability(
   code: Bitmap,
   grid: VoxelGrid,
-  opts: { moduleMm: number; layerMm: number; baseMm: number; nozzleMm: number },
+  opts: { moduleMm: number; layerMm: number; baseMm: number; nozzleMm: number; cellMm: number },
 ): PrintCheck {
   const phys = flipY(code);
   const w = phys.w, h = phys.h;
@@ -54,6 +56,7 @@ export function checkPrintability(
   }
 
   const modulePasses = opts.moduleMm / opts.nozzleMm;
+  const cellPasses = opts.cellMm / opts.nozzleMm;
   const heightMm = opts.baseMm + grid.h * opts.layerMm;
   const notes: string[] = [];
 
@@ -73,6 +76,15 @@ export function checkPrintability(
       'and neighbouring modules may bleed together.',
     );
   }
+  // Surface detail finer than one extrusion is simply not laid down. It is not
+  // a structural risk -- these are facets of a solid, not standalone posts --
+  // but the sculpture will come out smoother than the preview shows.
+  if (cellPasses < 1.2) {
+    notes.push(
+      `The sculpture is shaped at ${opts.cellMm.toFixed(2)} mm, finer than a ${opts.nozzleMm} mm nozzle can ` +
+      'lay down. It will print smoother than it looks here; lower the sculpture detail to see what you get.',
+    );
+  }
   if (cornerContacts > 200) {
     notes.push(
       `${cornerContacts} pairs of modules touch only at a corner. Harmless to a scanner, but they are the ` +
@@ -88,10 +100,11 @@ export function checkPrintability(
 
   return {
     modulePasses,
+    cellPasses,
     isolatedModules,
     cornerContacts,
     layers: Math.ceil(heightMm / opts.layerMm),
-    widthMm: grid.w * opts.moduleMm,
+    widthMm: grid.w * opts.cellMm,
     heightMm,
     verdict,
     notes,

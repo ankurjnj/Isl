@@ -3,7 +3,7 @@ import { MODELS, getModel, matchModel } from '../src/lib/models3d';
 import { carveSculpture } from '../src/lib/carve';
 import { buildDesign, DEFAULT_INPUT, exportStl } from '../src/lib/pipeline';
 import { concatMeshes, meshSculpture } from '../src/lib/mesh';
-import { buildFigure, countComponents, project } from '../src/lib/voxel';
+import { buildFigure, countComponents } from '../src/lib/voxel';
 import { flipY, makeBitmap } from '../src/lib/bitmap';
 import { extrudeSilhouette, revolveSilhouette } from '../src/lib/voxelize';
 
@@ -16,6 +16,29 @@ function check(name: string, cond: boolean, detail = '') {
 const payload = 'https://example.com/qr3d';
 const design = (over: Partial<Parameters<typeof buildDesign>[0]> = {}) =>
   buildDesign({ ...DEFAULT_INPUT, payload, model: MODELS[0].sdf, ...over });
+
+/**
+ * What the print shows from overhead, as modules in image space.
+ *
+ * The grid is finer than the code, so its projection has to be collapsed back
+ * to modules before it can be compared with one: a module reads dark if any
+ * cell within it carries material.
+ */
+function topModules(d: ReturnType<typeof design>) {
+  const g = d.grid, sub = d.report.xySub;
+  const n = g.w / sub;
+  const out = makeBitmap(n, n);
+  for (let z = 0; z < g.h; z++) {
+    for (let y = 0; y < g.d; y++) {
+      for (let x = 0; x < g.w; x++) {
+        if (g.data[(z * g.d + y) * g.w + x]) {
+          out.data[Math.floor(y / sub) * n + Math.floor(x / sub)] = 1;
+        }
+      }
+    }
+  }
+  return flipY(out); // physical space back to image space
+}
 
 console.log('\n== the code still scans with the sculpture carved into it ==');
 for (const text of [
@@ -38,7 +61,7 @@ console.log('\n== the sculpture camouflages: the top view is still the code ==')
   // object blocking part of it -- so almost every module has to be untouched.
   for (const id of ['rocket', 'cat', 'tree', 'castle']) {
     const d = design({ model: getModel(id)!.sdf });
-    const top = flipY(project(d.grid).topAchieved);
+    const top = topModules(d);
     let diff = 0;
     for (let i = 0; i < top.data.length; i++) if (top.data[i] !== d.qr.bitmap.data[i]) diff++;
     const drift = diff / (d.report.moduleCount ** 2);
@@ -57,10 +80,15 @@ console.log('\n== nothing stands over a light module ==');
   // visible from directly overhead and would corrupt the pattern.
   const d = design({ model: getModel('rocket')!.sdf });
   const phys = flipY(d.code);
+  const g = d.grid, sub = d.report.xySub;
   let violations = 0;
-  for (let z = 0; z < d.grid.h; z++) {
-    for (let i = 0; i < d.grid.w * d.grid.d; i++) {
-      if (d.grid.data[z * d.grid.w * d.grid.d + i] && !phys.data[i]) violations++;
+  for (let z = 0; z < g.h; z++) {
+    for (let y = 0; y < g.d; y++) {
+      for (let x = 0; x < g.w; x++) {
+        // A cell lies wholly inside one module, so this maps cleanly.
+        if (g.data[(z * g.d + y) * g.w + x]
+            && !phys.data[Math.floor(y / sub) * (g.w / sub) + Math.floor(x / sub)]) violations++;
+      }
     }
   }
   check('every voxel sits over a dark module', violations === 0, `${violations} violations`);
@@ -70,7 +98,8 @@ console.log('\n== bridging is cheap, and it is what makes one piece possible =='
 for (const m of MODELS) {
   const qr = makeQr(payload, 'H', 4, DEFAULT_INPUT.version);
   const bare = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, m.sdf,
-    { span: DEFAULT_INPUT.span, zSub: DEFAULT_INPUT.zSub, tileLayers: DEFAULT_INPUT.tileLayers });
+    { span: DEFAULT_INPUT.span, zSub: DEFAULT_INPUT.zSub, xySub: DEFAULT_INPUT.xySub,
+      tileLayers: DEFAULT_INPUT.tileLayers });
   const d = design({ model: m.sdf });
   check(m.id, d.report.looseParts === 1 && d.verify.matches && d.report.fillFraction < 0.08,
     `${bare.bridges} bridges, ${d.report.supports} supports, +${(d.report.fillFraction * 100).toFixed(0)}% material`);
@@ -108,16 +137,13 @@ console.log('\n== printed orientation (mirror check) ==');
     '1111111', '1000001', '1011101', '1011101', '1011101', '1000001', '1111111',
   ];
   const d = design();
-  const g = d.grid;
+  const top = topModules(d);
   const qz = d.qr.quietZone;
   const n = d.report.moduleCount;
-  // Read the printed tile from above, in physical space.
-  const dark = (x: number, y: number) => g.data[(0 * g.d + y) * g.w + x] === 1;
   const hasFinder = (cx: number, cy: number) => {
     for (let r = 0; r < 7; r++) {
       for (let c = 0; c < 7; c++) {
-        // Physical y runs opposite to the picture's rows.
-        if (dark(qz + cx + c, g.d - 1 - (qz + cy + r)) !== (FINDER[r][c] === '1')) return false;
+        if ((top.data[(qz + cy + r) * top.w + (qz + cx + c)] === 1) !== (FINDER[r][c] === '1')) return false;
       }
     }
     return true;
@@ -192,7 +218,8 @@ console.log('\n== bridging pays only for what is worth keeping ==');
   // roughly halves the pattern drift, and is safe: the tile still carries the
   // module, so nothing is left loose.
   const qr = makeQr(payload, 'H', 4, DEFAULT_INPUT.version);
-  const opts = { span: DEFAULT_INPUT.span, zSub: DEFAULT_INPUT.zSub, tileLayers: DEFAULT_INPUT.tileLayers };
+  const opts = { span: DEFAULT_INPUT.span, zSub: DEFAULT_INPUT.zSub, xySub: DEFAULT_INPUT.xySub,
+    tileLayers: DEFAULT_INPUT.tileLayers };
   const c = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, getModel('castle')!.sdf, opts);
   check('specks are dropped rather than bridged', c.droppedSpecks > c.bridges * 0.5,
     `${c.droppedSpecks} dropped vs ${c.bridges} bridged`);
@@ -213,6 +240,50 @@ console.log('\n== a payload too long for the chosen grid still works ==');
     `asked v2, used v${d.qr.version}`);
 }
 
+console.log('\n== detail finer than the code costs the code nothing ==');
+{
+  // The constraint is where material may stand, not how finely it may be
+  // shaped: a sub-voxel lies wholly inside one module, and the tile already
+  // raises every dark module, so a partly covered one still reads dark. So
+  // sharpening the sculpture must not move the pattern at all.
+  const coarse = design({ xySub: 1, zSub: 1 });
+  const fine = design({ xySub: 4, zSub: 4 });
+  check('finer cells really are finer', fine.report.cellMm < coarse.report.cellMm / 3.5,
+    `${coarse.report.cellMm.toFixed(2)} mm -> ${fine.report.cellMm.toFixed(2)} mm cells`);
+  check('the code is untouched by it',
+    Math.abs(fine.report.driftFraction - coarse.report.driftFraction) < 0.005,
+    `${(coarse.report.driftFraction * 100).toFixed(1)}% vs ${(fine.report.driftFraction * 100).toFixed(1)}% drift`);
+  check('both still decode and hold together',
+    coarse.verify.matches && fine.verify.matches
+    && coarse.report.looseParts === 1 && fine.report.looseParts === 1);
+  check('and the tile is the same size either way',
+    Math.abs(coarse.dims.widthMm - fine.dims.widthMm) < 0.01,
+    `${coarse.dims.widthMm.toFixed(1)} mm vs ${fine.dims.widthMm.toFixed(1)} mm`);
+}
+
+console.log('\n== the sculpture can take the whole code ==');
+{
+  // At full span there is no central region: the entire data area becomes the
+  // sculpture, finder patterns included, with only the quiet zone left flat.
+  const d = design({ span: 1 });
+  check('it spans every module', d.report.spanModules === d.report.moduleCount,
+    `${d.report.spanModules} of ${d.report.moduleCount}`);
+  check('and still scans as one piece', d.verify.matches && d.report.looseParts === 1,
+    `${(d.report.driftFraction * 100).toFixed(1)}% drift`);
+  check('the quiet zone stays clear', (() => {
+    const g = d.grid, sub = d.report.xySub, qz = d.qr.quietZone * sub;
+    for (let z = 0; z < g.h; z++) {
+      for (let y = 0; y < g.d; y++) {
+        for (let x = 0; x < g.w; x++) {
+          const inQuiet = x < qz || y < qz || x >= g.w - qz || y >= g.d - qz;
+          if (inQuiet && g.data[(z * g.d + y) * g.w + x]) return false;
+        }
+      }
+    }
+    return true;
+  })());
+}
+
 console.log('\n== the mesh is a closed, correctly-wound solid ==');
 {
   const signedVolume = (m: { positions: Float32Array; triangleCount: number }) => {
@@ -229,7 +300,7 @@ console.log('\n== the mesh is a closed, correctly-wound solid ==');
   for (const id of ['rocket', 'cat', 'castle']) {
     const qr = makeQr(payload, 'H', 4, 8);
     const carved = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, getModel(id)!.sdf,
-      { span: 0.55, zSub: 2, tileLayers: 2 });
+      { span: 0.55, zSub: 2, xySub: 2, tileLayers: 2 });
     const mm = 1.5, lm = 0.9;
     const mesh = meshSculpture(carved.grid, { moduleMm: mm, layerMm: lm, baseMm: 0, withBase: false });
     let solid = 0; for (const v of carved.grid.data) solid += v;

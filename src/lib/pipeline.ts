@@ -17,8 +17,10 @@ export interface DesignInput {
   model: Sdf;
   /** Sculpture footprint, as a fraction of the code's width. */
   span: number;
-  /** Vertical voxels per module: the one axis not tied to the module grid. */
+  /** Vertical voxels per module. */
   zSub: number;
+  /** Sculpture voxels per module across. Detail finer than the code itself. */
+  xySub: number;
   /** Layers of raised code beneath the sculpture. */
   tileLayers: number;
   moduleMm: number;
@@ -37,8 +39,11 @@ export interface Dimensions {
 
 export interface DesignReport {
   moduleCount: number;
-  /** Modules the sculpture spans. Its resolution, since x and y are the grid. */
+  /** Modules the sculpture spans. */
   spanModules: number;
+  /** Sculpture cells per module across, and their size in mm. */
+  xySub: number;
+  cellMm: number;
   /** True when the sculpture was cut back to keep the code readable. */
   spanClamped: boolean;
   /** Light modules darkened to join the sculpture. Each is one module of error. */
@@ -80,6 +85,10 @@ export const DEFAULT_INPUT: Omit<DesignInput, 'model' | 'payload'> = {
   version: 6,
   span: 0.72,
   zSub: 2,
+  // The sculpture is sampled three times finer than the code across, which the
+  // code does not mind: a sub-voxel sits wholly inside one module, and the tile
+  // already raises every dark module, so a partly covered one still reads dark.
+  xySub: 3,
   tileLayers: 2,
   moduleMm: 2.6,
   layerMm: 0.6,
@@ -100,7 +109,7 @@ export function buildDesign(input: DesignInput): Design {
   // for what was requested and step back only if the decoder actually objects.
   const attempt = (span: number) => {
     const carved = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, input.model, {
-      span, zSub: input.zSub, tileLayers: input.tileLayers,
+      span, zSub: input.zSub, xySub: input.xySub, tileLayers: input.tileLayers,
     });
     // The code a scanner reads is the one with the bridges in it, so that is
     // what gets verified -- not the pristine code we started from.
@@ -119,8 +128,10 @@ export function buildDesign(input: DesignInput): Design {
   }
   const { carved, verify } = best;
 
+  // The grid is finer than the code, so a cell is a fraction of a module.
+  const cellMm = input.moduleMm / carved.xySub;
   const meshed = meshSculpture(carved.grid, {
-    moduleMm: input.moduleMm, layerMm: input.layerMm, baseMm: input.baseMm,
+    moduleMm: cellMm, layerMm: input.layerMm, baseMm: input.baseMm,
     origin: [0, 0, input.baseMm], withBase: true,
   });
 
@@ -130,8 +141,8 @@ export function buildDesign(input: DesignInput): Design {
   }
 
   const dims: Dimensions = {
-    widthMm: carved.grid.w * input.moduleMm,
-    depthMm: carved.grid.d * input.moduleMm,
+    widthMm: carved.grid.w * cellMm,
+    depthMm: carved.grid.d * cellMm,
     heightMm: input.baseMm + carved.grid.h * input.layerMm,
     figureMm: carved.spanModules * input.moduleMm,
   };
@@ -139,6 +150,8 @@ export function buildDesign(input: DesignInput): Design {
   const report: DesignReport = {
     moduleCount: qr.moduleCount,
     spanModules: carved.spanModules,
+    xySub: carved.xySub,
+    cellMm,
     spanClamped: carved.spanModules < Math.round(qr.moduleCount * input.span),
     bridges: carved.bridges,
     driftFraction: drift / (qr.moduleCount * qr.moduleCount),
@@ -150,7 +163,8 @@ export function buildDesign(input: DesignInput): Design {
   };
 
   const print = checkPrintability(carved.code, carved.grid, {
-    moduleMm: input.moduleMm, layerMm: input.layerMm, baseMm: input.baseMm, nozzleMm: input.nozzleMm,
+    moduleMm: input.moduleMm, layerMm: input.layerMm, baseMm: input.baseMm,
+    nozzleMm: input.nozzleMm, cellMm,
   });
 
   return {

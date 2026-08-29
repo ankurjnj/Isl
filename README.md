@@ -52,26 +52,40 @@ Whatever still floats gets exactly **one** column reaching the tile, not all of
 them. Filling every column — which is what grounding does — turns a canopy into
 a solid mass and costs a tree most of its shape; filling one gives it a trunk.
 
-### Resolution, and printing
+### Detail is not limited by the code
 
-Because x and y are the module grid, **the code's version is the sculpture's
-resolution**. There is no separate detail axis to turn up — which makes raising
-the version very tempting, and that is exactly what produces something no FDM
-printer can hold. At 65 modules the tile had 143 single-module islands and 453
-pairs of modules touching only at a corner, with each module just 4 nozzle
-widths across.
+The code constrains **where** material may stand, not **how finely** it may be
+shaped. A sub-voxel lies wholly inside one module, so if that module is dark the
+projection is still legal — and the tile already raises every dark module, so
+one the sculpture only partly covers still reads dark from above.
 
-The resolution to that is not smaller modules but **a wider sculpture on a
-coarser code**. A span of 0.72 on a 41-module code gives a 30-module sculpture
-at 2.6 mm — 6.5 nozzle widths — against 36 modules at 1.6 mm on a 65-module one.
-Nearly the same sculpture, modules 60% wider, and the tile comes out about the
-same size either way, because the module count and the module size trade off
-against each other at a fixed footprint.
+So the sculpture is shaped several times finer than the code across, and it
+costs the code nothing: sharpening cells from 2.6 mm to 0.65 mm leaves pattern
+drift unchanged at about 1%. The module grid decides the sculpture's *outline*;
+its surface can be as smooth as the printer can hold.
+
+At full span the sculpture takes the whole data area — finder patterns
+included — with only the quiet zone left flat.
+
+### Printing
+
+Raising the code version is tempting, and it is exactly what produces something
+no FDM printer can hold. At 65 modules the tile had 143 single-module islands
+and 453 pairs of modules touching only at a corner, with each module just 4
+nozzle widths across.
+
+The answer is not smaller modules but **a wider sculpture on a coarser code**,
+shaped finely within it. A span of 0.72 on a 41-module code gives a 30-module
+sculpture at 2.6 mm — 6.5 nozzle widths — against 36 modules at 1.6 mm on a
+65-module one. The tile comes out about the same size either way, because module
+count and module size trade off at a fixed footprint.
 
 The app reports this rather than deciding it: nozzle width, modules per nozzle
-pass, layer count, island and corner-contact counts, and a verdict, all
-recomputed as the controls move. The default settings land on the comfortable
-side of it.
+pass, the sculpture's own cell size in nozzle widths, layer count, island and
+corner-contact counts, and a verdict, all recomputed as the controls move. The
+defaults land on the comfortable side of it. Surface detail finer than one
+extrusion is flagged as *will print smoother than it looks* — it is not a
+structural risk, since these are facets of a solid rather than standalone posts.
 
 Bridges cost error-correction budget, which scales with the code's area while
 the bridges scale with the sculpture's. So the span is fitted the same way the
@@ -133,6 +147,12 @@ at an edge or a corner are not a printable weld), with the supports adding under
 8% material. This caught three real modelling errors — a mushroom cap that only
 touched its stalk, a whale's flukes abutting rather than overlapping the
 peduncle, and a whale stand that stopped short of the body.
+
+**Detail is asserted to cost the code nothing.** Sharpening the sculpture must
+not move the pattern: the suite requires cells four times finer to leave drift
+within half a percentage point, and the tile exactly the same size. It also
+asserts that at full span the sculpture covers every module while the quiet zone
+stays completely clear.
 
 **Printability is asserted at the defaults.** The suite requires the shipped
 settings to come out "comfortable", requires a fine-grained alternative to be

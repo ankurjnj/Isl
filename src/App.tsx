@@ -39,7 +39,7 @@ export default function App() {
   const [pinned, setPinned] = useState(false);
   const [version, setVersion] = useState(DEFAULT_INPUT.version);
   const [span, setSpan] = useState(DEFAULT_INPUT.span);
-  const [zSub, setZSub] = useState(DEFAULT_INPUT.zSub);
+  const [detail, setDetail] = useState(DEFAULT_INPUT.xySub);
   const [ecc, setEcc] = useState<EccLevel>('H');
   const [moduleMm, setModuleMm] = useState(DEFAULT_INPUT.moduleMm);
   const [layerMm, setLayerMm] = useState(DEFAULT_INPUT.layerMm);
@@ -78,9 +78,12 @@ export default function App() {
   // itself forever and rebuild the design on a timer with no input at all.
   const inputs = useMemo<Omit<DesignInput, 'model'> | null>(
     () => (payload.trim()
-      ? { ...DEFAULT_INPUT, payload: payload.trim(), ecc, version, span, zSub, moduleMm, layerMm, baseMm, nozzleMm }
+      // One control drives both axes: shaping the sculpture finely across but
+      // coarsely up its height reads as smeared, not detailed.
+      ? { ...DEFAULT_INPUT, payload: payload.trim(), ecc, version, span, xySub: detail, zSub: detail,
+          moduleMm, layerMm, baseMm, nozzleMm }
       : null),
-    [payload, ecc, version, span, zSub, moduleMm, layerMm, baseMm, nozzleMm],
+    [payload, ecc, version, span, detail, moduleMm, layerMm, baseMm, nozzleMm],
   );
   const settledInputs = useSettled(inputs);
   const settledSource = useSettled(source);
@@ -185,10 +188,10 @@ export default function App() {
 
         <section className="grid2">
           <Field label={`Sculpture size — ${design ? `${design.report.spanModules} of ${design.report.moduleCount} modules` : `${(span * 100).toFixed(0)}%`}`}>
-            <input className="range" type="range" min={0.2} max={0.8} step={0.01} value={span} onChange={(e) => setSpan(+e.target.value)} />
+            <input className="range" type="range" min={0.2} max={1} step={0.01} value={span} onChange={(e) => setSpan(+e.target.value)} />
           </Field>
-          <Field label={`Vertical detail — ${zSub}× per module`}>
-            <input className="range" type="range" min={1} max={4} step={1} value={zSub} onChange={(e) => setZSub(+e.target.value)} />
+          <Field label={`Detail — ${design ? `${design.report.cellMm.toFixed(2)} mm` : `${detail}×`} per cell`}>
+            <input className="range" type="range" min={1} max={4} step={1} value={detail} onChange={(e) => setDetail(+e.target.value)} />
           </Field>
         </section>
 
@@ -244,6 +247,7 @@ export default function App() {
                 <Stat k="Code" v={`v${design.qr.version}-${design.qr.ecc} · ${design.report.moduleCount}²`} />
                 <Stat k="Size" v={`${design.dims.widthMm.toFixed(0)} × ${design.dims.depthMm.toFixed(0)} × ${design.dims.heightMm.toFixed(0)} mm`} />
                 <Stat k="Sculpture" v={`${design.report.spanModules} modules · ${design.dims.figureMm.toFixed(0)} mm`} />
+                <Stat k="Shaped at" v={`${design.report.cellMm.toFixed(2)} mm cells`} />
                 <Stat k="Pattern drift" v={`${(design.report.driftFraction * 100).toFixed(1)}%`} />
                 <Stat k="Bridges" v={`${design.report.bridges}`} />
                 <Stat k="Supports" v={`${design.report.supports}`} />
@@ -258,8 +262,8 @@ export default function App() {
                 </strong>
                 <span>
                   {design.print.modulePasses.toFixed(1)} nozzle widths per module ·{' '}
-                  {design.print.layers} layers · {design.print.isolatedModules} single-module islands ·{' '}
-                  {design.print.cornerContacts} corner-touching pairs
+                  sculpture shaped at {design.print.cellPasses.toFixed(1)} ·{' '}
+                  {design.print.layers} layers · {design.print.isolatedModules} single-module islands
                 </span>
               </div>
 

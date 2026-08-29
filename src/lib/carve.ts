@@ -1,6 +1,6 @@
 import { Bitmap, flipY, makeBitmap } from './bitmap';
 import { Sdf } from './sdf';
-import { VoxelGrid, idx } from './voxel';
+import { VoxelGrid } from './voxel';
 
 /**
  * Carve the sculpture out of the code, so it camouflages into the pattern.
@@ -24,8 +24,19 @@ import { VoxelGrid, idx } from './voxel';
 export interface CarveOptions {
   /** Sculpture footprint as a fraction of the code's width. */
   span: number;
-  /** Vertical voxels per module. The one axis free of the module grid. */
+  /** Vertical voxels per module. */
   zSub: number;
+  /**
+   * Sculpture voxels per module across.
+   *
+   * The code constrains where material may stand, not how finely it may be
+   * shaped. A sub-voxel lies wholly inside one module, so if that module is
+   * dark the projection stays legal; and the tile already raises every dark
+   * module, so one the sculpture only partly covers still reads dark from
+   * above. The sculpture can therefore carry detail finer than the code
+   * without costing the code anything.
+   */
+  xySub: number;
   /** Layers of raised code beneath the sculpture. */
   tileLayers: number;
 }
@@ -36,6 +47,8 @@ export interface CarveResult {
   code: Bitmap;
   spanModules: number;
   originModule: number;
+  /** Sculpture voxels per module across. */
+  xySub: number;
   /** Light modules darkened to join fragments. Each is one module of error. */
   bridges: number;
   /** Fragments too small to be worth a bridge, removed instead. */
@@ -118,6 +131,7 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
   const w = qr.w, d = qr.h;
   const spanModules = Math.max(4, Math.min(moduleCount, Math.round(moduleCount * opts.span)));
   const originModule = quietZone + Math.floor((moduleCount - spanModules) / 2);
+  const xySub = Math.max(1, Math.round(opts.xySub));
 
   // Normalise the model into its footprint from the bounds its primitives
   // carry, so authored coordinates need not be calibrated by hand.
@@ -133,46 +147,78 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
   const tile = Math.max(1, opts.tileLayers);
   const h = tile + sculptH;
 
+  // The grid is finer than the code across x and y; the module grid survives as
+  // a mask over it, which is all the code actually requires.
+  const W = w * xySub, D = d * xySub;
+  const N = W * D;
+
   // Physical space: an observer looking down with +x to their right sees +y
   // going up their view, so image row 0 must sit at the far edge. Without this
   // the print is a vertical mirror of the code, which no rotation can fix.
   const phys = flipY(qr);
-  const grid: VoxelGrid = { w, d, h, data: new Uint8Array(w * d * h) };
+  const grid: VoxelGrid = { w: W, d: D, h, data: new Uint8Array(W * D * h) };
+  const darkAt = (sx: number, sy: number) =>
+    phys.data[Math.floor(sy / xySub) * w + Math.floor(sx / xySub)];
 
   // The tile: every dark module, raised.
   for (let z = 0; z < tile; z++) {
-    for (let i = 0; i < w * d; i++) if (phys.data[i]) grid.data[z * w * d + i] = 1;
+    for (let sy = 0; sy < D; sy++) {
+      for (let sx = 0; sx < W; sx++) if (darkAt(sx, sy)) grid.data[z * N + sy * W + sx] = 1;
+    }
   }
 
   // The sculpture, kept only where the code is dark.
-  const tol = 0.45 / (spanModules * scale);
+  const sxSpan = spanModules * xySub;
+  const sxOrigin = originModule * xySub;
+  const tol = 0.45 / (sxSpan * scale);
   for (let z = 0; z < sculptH; z++) {
     const mz = z0 + ((z + 0.5) / sculptH) * (aspect / scale);
-    for (let y = 0; y < spanModules; y++) {
-      const my = ((y + 0.5) / spanModules - 0.5) / scale;
-      for (let x = 0; x < spanModules; x++) {
-        const gx = x + originModule, gy = y + originModule;
-        if (!phys.data[gy * w + gx]) continue;
-        if (model(((x + 0.5) / spanModules - 0.5) / scale, my, mz) < tol) {
-          grid.data[idx(grid, gx, gy, z + tile)] = 1;
+    for (let y = 0; y < sxSpan; y++) {
+      const my = ((y + 0.5) / sxSpan - 0.5) / scale;
+      const gy = y + sxOrigin;
+      for (let x = 0; x < sxSpan; x++) {
+        const gx = x + sxOrigin;
+        if (!darkAt(gx, gy)) continue;
+        if (model(((x + 0.5) / sxSpan - 0.5) / scale, my, mz) < tol) {
+          grid.data[(z + tile) * N + gy * W + gx] = 1;
         }
       }
     }
   }
 
-  // Bridge the sculpture's footprint. Bridges may only be placed under the
-  // sculpture -- darkening a module out in the open pattern would be a visible
-  // blemish for no structural gain.
+  const setModule = (mx: number, my: number, z: number, v: number) => {
+    for (let j = 0; j < xySub; j++) {
+      for (let i = 0; i < xySub; i++) grid.data[z * N + (my * xySub + j) * W + (mx * xySub + i)] = v;
+    }
+  };
+  const moduleHas = (mx: number, my: number, z: number) => {
+    for (let j = 0; j < xySub; j++) {
+      for (let i = 0; i < xySub; i++) {
+        if (grid.data[z * N + (my * xySub + j) * W + (mx * xySub + i)]) return true;
+      }
+    }
+    return false;
+  };
+
+  // Bridging stays on the module grid, because a bridge is a module of error in
+  // the code -- there is no such thing as darkening part of a module.
   const foot = new Uint8Array(w * d);
   for (let z = tile; z < h; z++) {
-    for (let i = 0; i < w * d; i++) if (grid.data[z * w * d + i]) foot[i] = 1;
+    for (let sy = 0; sy < D; sy++) {
+      for (let sx = 0; sx < W; sx++) {
+        if (grid.data[z * N + sy * W + sx]) foot[Math.floor(sy / xySub) * w + Math.floor(sx / xySub)] = 1;
+      }
+    }
   }
+
   // Drop specks before bridging. A fragment one or two modules across costs a
   // darkened module to reach and contributes almost nothing to the shape, so
   // paying pattern drift for it is a bad trade. Removing it is safe: the tile
   // still carries that module, so nothing is left loose -- the sculpture simply
   // has no material above it.
-  const dropped = dropSpecks(grid, foot, w, d, tile, h, 2);
+  const dropped = dropSpecks(foot, w, 2, (mx, my) => {
+    for (let z = tile; z < h; z++) setModule(mx, my, z, 0);
+  });
 
   const allowed = new Uint8Array(w * d);
   for (let y = originModule; y < originModule + spanModules; y++) {
@@ -182,33 +228,31 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
 
   const code = makeBitmap(w, d);
   code.data.set(qr.data);
-  const N = w * d;
   for (const i of bridges) {
-    const x = i % w, y = Math.floor(i / w);
+    const mx = i % w, my = Math.floor(i / w);
     // A bridge is a real dark module: it joins the sculpture, raises the tile
     // beneath it, and must appear in the code a scanner reads.
-    for (let z = 0; z < tile; z++) grid.data[z * N + i] = 1;
-    code.data[(d - 1 - y) * w + x] = 1;
+    for (let z = 0; z < tile; z++) setModule(mx, my, z, 1);
+    code.data[(d - 1 - my) * w + mx] = 1;
 
     // And it has to carry material at the heights its neighbours occupy.
     // Joining fragments only in plan leaves them still adrift in space -- a
     // mushroom cap floating a dozen layers above the bridge that was supposed
     // to hold it, and needing a prop under every fragment instead.
-    const nb = [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < d - 1 ? i + w : -1]
-      .filter((q) => q >= 0);
+    const nb: [number, number][] = [[mx - 1, my], [mx + 1, my], [mx, my - 1], [mx, my + 1]];
     for (let z = tile; z < h; z++) {
-      for (const q of nb) {
-        if (grid.data[z * N + q]) { grid.data[z * N + i] = 1; break; }
+      for (const [nx, ny] of nb) {
+        if (nx < 0 || ny < 0 || nx >= w || ny >= d) continue;
+        if (moduleHas(nx, ny, z)) { setModule(mx, my, z, 1); break; }
       }
     }
   }
 
   // A connected footprint does not guarantee a connected solid: two adjacent
   // columns can hold material at heights that never meet. Whatever is still
-  // adrift is filled down to the tile -- the fewest columns that will do,
-  // rather than the blanket grounding that would flatten the whole shape.
+  // adrift is propped up, one module column each.
   const before = countSolid(grid);
-  const filledColumns = fillStragglers(grid, tile);
+  const filledColumns = fillStragglers(grid, tile, xySub, setModule);
   const after = countSolid(grid);
 
   return {
@@ -216,6 +260,7 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
     code,
     spanModules,
     originModule,
+    xySub,
     droppedSpecks: dropped,
     bridges: bridges.length,
     filledColumns,
@@ -225,15 +270,15 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
 }
 
 /**
- * Remove footprint fragments of at most `maxModules`, clearing their sculpture
- * voxels. Operates on the footprint so a whole speck goes at once, and updates
- * it in place so the bridging that follows never sees them.
+ * Remove footprint fragments of at most `maxModules`, via `clear` per module.
+ * Operates on the module footprint so a whole speck goes at once, and updates it
+ * in place so the bridging that follows never sees them.
  */
 function dropSpecks(
-  g: VoxelGrid, foot: Uint8Array, w: number, d: number, tile: number, h: number, maxModules: number,
+  foot: Uint8Array, w: number, maxModules: number,
+  clear: (mx: number, my: number) => void,
 ): number {
-  const seen = new Uint8Array(w * d);
-  const N = w * d;
+  const seen = new Uint8Array(foot.length);
   let dropped = 0;
   for (let s = 0; s < foot.length; s++) {
     if (!foot[s] || seen[s]) continue;
@@ -244,6 +289,7 @@ function dropSpecks(
       const p = stack.pop()!;
       cells.push(p);
       const x = p % w, y = Math.floor(p / w);
+      const d = foot.length / w;
       for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < d - 1 ? p + w : -1]) {
         if (q >= 0 && foot[q] && !seen[q]) { seen[q] = 1; stack.push(q); }
       }
@@ -251,7 +297,7 @@ function dropSpecks(
     if (cells.length > maxModules) continue;
     for (const c of cells) {
       foot[c] = 0;
-      for (let z = tile; z < h; z++) g.data[z * N + c] = 0;
+      clear(c % w, Math.floor(c / w));
     }
     dropped++;
   }
@@ -271,26 +317,37 @@ function countSolid(g: VoxelGrid): number {
  * Filling every column -- which is what grounding does -- turns a canopy into a
  * solid mass and costs a tree most of its shape; filling one gives it a trunk.
  * The column chosen is the one whose part hangs lowest, so the support is the
- * shortest available and reads as the stem it effectively is.
+ * shortest available and reads as the stem it effectively is. A whole module is
+ * propped rather than a single sub-voxel, which would be thinner than a nozzle
+ * can lay down.
  */
-function fillStragglers(g: VoxelGrid, tile: number): number {
+function fillStragglers(
+  g: VoxelGrid, tile: number, xySub: number,
+  setModule: (mx: number, my: number, z: number, v: number) => void,
+): number {
   const N = g.w * g.d;
   let filled = 0;
   for (let pass = 0; pass < 12; pass++) {
     const { label, anchored } = labelAnchored(g, tile);
-    // Per loose part, the column where its material sits lowest.
-    const lowest = new Map<number, { col: number; z: number }>();
+    const lowest = new Map<number, { mx: number; my: number; z: number }>();
     for (let i = 0; i < g.data.length; i++) {
       if (!g.data[i]) continue;
       const id = label[i];
       if (!id || anchored.has(id)) continue;
       const z = Math.floor(i / N);
       const cur = lowest.get(id);
-      if (!cur || z < cur.z) lowest.set(id, { col: i % N, z });
+      if (!cur || z < cur.z) {
+        const cell = i % N;
+        lowest.set(id, {
+          mx: Math.floor((cell % g.w) / xySub),
+          my: Math.floor(Math.floor(cell / g.w) / xySub),
+          z,
+        });
+      }
     }
     if (!lowest.size) return filled;
-    for (const { col, z } of lowest.values()) {
-      for (let k = 0; k < z; k++) g.data[k * N + col] = 1;
+    for (const { mx, my, z } of lowest.values()) {
+      for (let k = 0; k < z; k++) setModule(mx, my, k, 1);
       filled++;
     }
   }
