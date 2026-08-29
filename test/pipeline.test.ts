@@ -50,7 +50,7 @@ for (const text of [
   for (const ecc of ['Q', 'H'] as const) {
     const d = design({ payload: text, ecc });
     check(`decode v${d.qr.version}-${ecc} (${text.length} chars)`, d.verify.matches,
-      `${d.report.bridges} bridges, ${(d.report.driftFraction * 100).toFixed(1)}% drift`);
+      `${(d.report.coverageFraction * 100).toFixed(0)}% of the code sculpted`);
   }
 }
 
@@ -94,15 +94,14 @@ console.log('\n== nothing stands over a light module ==');
   check('every voxel sits over a dark module', violations === 0, `${violations} violations`);
 }
 
-console.log('\n== bridging is cheap, and it is what makes one piece possible ==');
+console.log('\n== the skirt covers the code and holds it together ==');
 for (const m of MODELS) {
-  const qr = makeQr(payload, 'H', 4, DEFAULT_INPUT.version);
-  const bare = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, m.sdf,
-    { span: DEFAULT_INPUT.span, zSub: DEFAULT_INPUT.zSub, xySub: DEFAULT_INPUT.xySub,
-      tileLayers: DEFAULT_INPUT.tileLayers, selfSupport: DEFAULT_INPUT.selfSupport });
   const d = design({ model: m.sdf });
-  check(m.id, d.report.looseParts === 1 && d.verify.matches && d.report.fillFraction < 0.08,
-    `${bare.bridges} bridges, ${d.report.supports} supports, +${(d.report.fillFraction * 100).toFixed(0)}% material`);
+  check(m.id,
+    d.report.looseParts === 1 && d.verify.matches
+    && d.report.fillFraction < 0.08 && d.report.coverageFraction > 0.999,
+    `${(d.report.coverageFraction * 100).toFixed(1)}% sculpted, ${d.report.supports} supports, ` +
+    `+${(d.report.fillFraction * 100).toFixed(0)}% material`);
 }
 
 console.log('\n== supports are minimal, not blanket grounding ==');
@@ -211,22 +210,21 @@ console.log('\n== the defaults are actually printable ==');
     `0.8 mm nozzle -> ${fat.print.modulePasses.toFixed(1)} passes, "${fat.print.verdict}"`);
 }
 
-console.log('\n== bridging pays only for what is worth keeping ==');
+console.log('\n== the code itself is never altered ==');
 {
-  // A fragment one or two modules across costs a darkened module to reach and
-  // adds almost nothing to the shape. Dropping those rather than bridging them
-  // roughly halves the pattern drift, and is safe: the tile still carries the
-  // module, so nothing is left loose.
-  const qr = makeQr(payload, 'H', 4, DEFAULT_INPUT.version);
-  const opts = { span: DEFAULT_INPUT.span, zSub: DEFAULT_INPUT.zSub, xySub: DEFAULT_INPUT.xySub,
-    tileLayers: DEFAULT_INPUT.tileLayers, selfSupport: DEFAULT_INPUT.selfSupport };
-  const c = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, getModel('castle')!.sdf, opts);
-  check('specks are dropped rather than bridged', c.droppedSpecks > c.bridges * 0.5,
-    `${c.droppedSpecks} dropped vs ${c.bridges} bridged`);
-  const d = design({ model: getModel('castle')!.sdf });
-  check('which keeps the pattern close to the plain code', d.report.driftFraction < 0.025,
-    `${(d.report.driftFraction * 100).toFixed(1)}% drift`);
-  check('and it is still one piece that scans', d.report.looseParts === 1 && d.verify.matches);
+  // The skirt only ever adds material above modules that are already dark, so
+  // there is nothing for the error correction to undo -- the pattern a scanner
+  // reads is the code exactly as the generator produced it.
+  for (const id of ['castle', 'whale', 'rocket']) {
+    const d = design({ model: getModel(id)!.sdf });
+    let diff = 0;
+    for (let i = 0; i < d.code.data.length; i++) {
+      if (d.code.data[i] !== d.qr.bitmap.data[i]) diff++;
+    }
+    check(`${id}: the pattern is untouched`, diff === 0, `${diff} modules differ`);
+    check(`${id}: and it is one piece that scans`,
+      d.report.looseParts === 1 && d.verify.matches);
+  }
 }
 
 console.log('\n== a payload too long for the chosen grid still works ==');
@@ -256,8 +254,8 @@ console.log('\n== detail finer than the code costs the code nothing ==');
     `${coarse.report.cellMm.toFixed(2)} mm -> ${fine.report.cellMm.toFixed(2)} mm cells ` +
     `(${coarse.report.xySub}× -> ${fine.report.xySub}×)`);
   check('the code is untouched by it',
-    Math.abs(fine.report.driftFraction - coarse.report.driftFraction) < 0.005,
-    `${(coarse.report.driftFraction * 100).toFixed(1)}% vs ${(fine.report.driftFraction * 100).toFixed(1)}% drift`);
+    coarse.report.coverageFraction > 0.999 && fine.report.coverageFraction > 0.999,
+    `${(coarse.report.coverageFraction * 100).toFixed(1)}% vs ${(fine.report.coverageFraction * 100).toFixed(1)}% sculpted`);
   check('both still decode and hold together',
     coarse.verify.matches && fine.verify.matches
     && coarse.report.looseParts === 1 && fine.report.looseParts === 1);
@@ -273,8 +271,9 @@ console.log('\n== the sculpture can take the whole code ==');
   const d = design({ span: 1 });
   check('it spans every module', d.report.spanModules === d.report.moduleCount,
     `${d.report.spanModules} of ${d.report.moduleCount}`);
-  check('and still scans as one piece', d.verify.matches && d.report.looseParts === 1,
-    `${(d.report.driftFraction * 100).toFixed(1)}% drift`);
+  check('and still scans as one piece', d.verify.matches && d.report.looseParts === 1);
+  check('with no dark module left flat', d.report.coverageFraction > 0.999,
+    `${(d.report.coverageFraction * 100).toFixed(1)}% sculpted`);
   check('the quiet zone stays clear', (() => {
     const g = d.grid, sub = d.report.xySub, qz = d.qr.quietZone * sub;
     for (let z = 0; z < g.h; z++) {
@@ -308,8 +307,10 @@ console.log('\n== self-supporting really means no support material ==');
   const a = design({ selfSupport: true });
   const b = design({ selfSupport: false });
   check('shaving leaves the code untouched',
-    Math.abs(a.report.driftFraction - b.report.driftFraction) < 1e-9 && a.verify.matches,
-    `${(a.report.driftFraction * 100).toFixed(1)}% both ways`);
+    a.verify.matches && b.verify.matches
+    && a.report.coverageFraction > 0.999 && b.report.coverageFraction > 0.999,
+    `${(a.report.coverageFraction * 100).toFixed(1)}% and ` +
+    `${(b.report.coverageFraction * 100).toFixed(1)}% sculpted`);
 }
 
 console.log('\n== a build always terminates, whatever the settings ==');
@@ -374,8 +375,7 @@ console.log('\n== the sculpture takes the whole code, and leaves no needles ==')
       `${towers(m.grid, m.report.xySub, DEFAULT_INPUT.tileLayers)} towers, ${m.report.trimmedColumns} trimmed`);
   }
   // Trimming and scrapping only remove material, so the code cannot be harmed.
-  check('and the code still reads', d.verify.matches && d.report.looseParts === 1,
-    `${(d.report.driftFraction * 100).toFixed(1)}% drift`);
+  check('and the code still reads', d.verify.matches && d.report.looseParts === 1);
 }
 
 console.log('\n== the mesh is a closed, correctly-wound solid ==');

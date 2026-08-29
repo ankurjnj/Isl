@@ -263,8 +263,8 @@ export default function App() {
                 <Stat k="Size" v={`${design.dims.widthMm.toFixed(0)} × ${design.dims.depthMm.toFixed(0)} × ${design.dims.heightMm.toFixed(0)} mm`} />
                 <Stat k="Sculpture" v={`${design.report.spanModules} modules · ${design.dims.figureMm.toFixed(0)} mm`} />
                 <Stat k="Shaped at" v={`${design.report.cellMm.toFixed(2)} mm cells`} />
-                <Stat k="Pattern drift" v={`${(design.report.driftFraction * 100).toFixed(1)}%`} />
-                <Stat k="Bridges" v={`${design.report.bridges}`} />
+                <Stat k="Coverage" v={`${(design.report.coverageFraction * 100).toFixed(0)}%`} />
+                <Stat k="Pattern drift" v="none" />
                 <Stat k="Supports" v={`${design.report.supports}`} />
                 <Stat k="Pieces" v={`${design.report.looseParts}`} />
                 <Stat k="Overhangs" v={design.report.overhangs === 0 ? 'none' : `${design.report.overhangs}`} />

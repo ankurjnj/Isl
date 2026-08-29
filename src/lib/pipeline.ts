@@ -54,10 +54,8 @@ export interface DesignReport {
   trimmedColumns: number;
   /** True when the sculpture was cut back to keep the code readable. */
   spanClamped: boolean;
-  /** Light modules darkened to join the sculpture. Each is one module of error. */
-  bridges: number;
-  /** How far the top view departs from the plain code. */
-  driftFraction: number;
+  /** Share of the code's dark modules that carry sculpture, not flat plate. */
+  coverageFraction: number;
   /** Supports added under parts that reached nothing. One column each. */
   supports: number;
   /** Voxels those supports added, against the carved total. */
@@ -70,7 +68,7 @@ export interface DesignReport {
 export interface DesignView {
   qr: QrResult;
   grid: VoxelGrid;
-  /** The code as a scanner sees it: the original plus the bridges. */
+  /** The code as a scanner sees it. Unmodified. */
   code: Bitmap;
   meshes: { body: Mesh; base: Mesh };
   verify: VerifyResult;
@@ -130,44 +128,15 @@ export function buildDesign(input: DesignInput): Design {
   while (detail > 1 && gridCells(detail) > CELL_BUDGET) detail--;
   const zSub = Math.max(1, Math.min(input.zSub, detail));
 
-  // Fit the sculpture to the code's error budget.
-  //
-  // Bridges scale with the sculpture's area while the budget scales with the
-  // code's, so a wide sculpture on a coarse code can need more darkened modules
-  // than the code can absorb -- and a blocky subject needs the most, because a
-  // dense footprint fragments into more pieces than a slender one. Rather than
-  // capping the span by a rule that would be wrong for half the library, ask
-  // for what was requested and step back only if the decoder actually objects.
-  const attempt = (span: number, sub: number, zs: number) => {
-    const carved = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, input.model, {
-      span, zSub: zs, xySub: sub, tileLayers: input.tileLayers, selfSupport: input.selfSupport,
-    });
-    // The code a scanner reads is the one with the bridges in it, so that is
-    // what gets verified -- not the pristine code we started from.
-    return { carved, verify: verifyTopView(carved.code, input.payload) };
-  };
-
-  // Search for the span at detail 1, then carve once at the detail asked for.
-  //
-  // Bridging works on the module grid, so whether a span decodes barely depends
-  // on how finely the sculpture is shaped within it -- but a full-detail carve
-  // costs an order of magnitude more. Searching at full detail meant four of
-  // them back to back, which is where the wait came from.
-  let span = input.span;
-  if (!attempt(span, 1, 1).verify.matches) {
-    let lo = 0.2, hi = span;
-    for (let i = 0; i < 4; i++) {
-      const mid = (lo + hi) / 2;
-      if (attempt(mid, 1, 1).verify.matches) lo = mid; else hi = mid;
-    }
-    span = lo;
-  }
-
-  let best = attempt(span, detail, zSub);
-  // The cheap search can be off by a little, so confirm at the real detail and
-  // give ground once if it was.
-  if (!best.verify.matches) best = attempt(span * 0.75, detail, zSub);
-  const { carved, verify } = best;
+  // No search, and no fitting to an error budget: the skirt never darkens a
+  // light module, so the pattern a scanner reads is the code exactly as
+  // generated. It decodes or the generator is broken. This used to be four
+  // trial carves looking for a span the code could absorb.
+  const carved = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, input.model, {
+    span: input.span, zSub, xySub: detail,
+    tileLayers: input.tileLayers, selfSupport: input.selfSupport,
+  });
+  const verify = verifyTopView(carved.code, input.payload);
 
   // The grid is finer than the code, so a cell is a fraction of a module.
   const cellMm = input.moduleMm / carved.xySub;
@@ -175,11 +144,6 @@ export function buildDesign(input: DesignInput): Design {
     moduleMm: cellMm, layerMm: input.layerMm, baseMm: input.baseMm,
     origin: [0, 0, input.baseMm], withBase: true,
   });
-
-  let drift = 0;
-  for (let i = 0; i < carved.code.data.length; i++) {
-    if (carved.code.data[i] !== qr.bitmap.data[i]) drift++;
-  }
 
   const dims: Dimensions = {
     widthMm: carved.grid.w * cellMm,
@@ -197,8 +161,7 @@ export function buildDesign(input: DesignInput): Design {
     shavedFraction: carved.shavedFraction,
     trimmedColumns: carved.trimmedColumns,
     spanClamped: carved.spanModules < Math.round(qr.moduleCount * input.span),
-    bridges: carved.bridges,
-    driftFraction: drift / (qr.moduleCount * qr.moduleCount),
+    coverageFraction: carved.coverageFraction,
     supports: carved.filledColumns,
     fillFraction: carved.fillFraction,
     looseParts: carved.looseParts,
@@ -228,8 +191,7 @@ function collectWarnings(
     w.push(
       verify.decoded
         ? 'The top view decodes to different data than you entered. Do not print this.'
-        : 'The top view did not decode — the sculpture needed more bridges than this code can absorb. ' +
-          'Shrink it, or raise the code version for more room.',
+        : 'The top view did not decode. Please report this — the pattern is not modified, so it should not happen.',
     );
   }
   if (print.verdict !== 'comfortable') {
@@ -251,18 +213,6 @@ function collectWarnings(
     w.push(
       `Detail was reduced to ${report.xySub}× per module to keep this size of code workable. ` +
       'A smaller code or a smaller sculpture can carry more.',
-    );
-  }
-  if (report.spanClamped) {
-    w.push(
-      `The sculpture was reduced to ${report.spanModules} modules — any wider and joining its fragments ` +
-      'costs more darkened modules than this code can absorb. A larger code version would allow more.',
-    );
-  }
-  if (report.driftFraction > 0.05) {
-    w.push(
-      `${(report.driftFraction * 100).toFixed(1)}% of the code was darkened to hold the sculpture together. ` +
-      'It still scans, but a smaller sculpture or a larger code would leave the pattern cleaner.',
     );
   }
   if (report.overhangs > 0) {

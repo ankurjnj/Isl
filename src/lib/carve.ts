@@ -12,14 +12,19 @@ import { makeSelfSupporting, VoxelGrid } from './voxel';
  * touch only where their modules are face-adjacent -- and on its own it
  * shatters the shape into dozens of loose fragments.
  *
- * What makes it workable is that the code does not have to be perfect, only
- * decodable. Darkening a light module is a single module of error, and a QR
- * carries error correction to spare. Joining the fragments turns out to cost
- * roughly one module each: the bridges are found by growing every fragment
- * outward at once and darkening only where two fronts meet. Fifty-odd extra
- * dark modules, scattered among thousands and indistinguishable from the
- * pattern, buy a sculpture that is one connected piece and keeps its real form.
+ * What holds it together is the ground it stands on. Every dark module gets a
+ * height of its own: a landform swelling out of the sculpture and falling away
+ * toward the rim, undulating gently over the far field. That covers the code
+ * edge to edge -- no dark module is left as flat plate, which is what a
+ * silhouette alone can never manage, since fitting a rocket to the code still
+ * leaves three quarters of it bare -- and it grounds the fragments as a side
+ * effect, because a piece resting on the skirt is a piece resting on the plate.
+ *
+ * The skirt costs the code nothing. It only ever adds material above modules
+ * that are already dark, so the pattern a scanner reads is the QR exactly as
+ * generated, with no error budget spent and nothing for the correction to undo.
  */
+
 
 export interface CarveOptions {
   /** Sculpture footprint as a fraction of the code's width. */
@@ -51,15 +56,15 @@ export interface CarveOptions {
 
 export interface CarveResult {
   grid: VoxelGrid;
-  /** The code as a scanner sees it: the original plus the bridges. */
+  /** The code as a scanner sees it. Unmodified: the skirt spends no budget. */
   code: Bitmap;
   spanModules: number;
   originModule: number;
   /** Sculpture voxels per module across. */
   xySub: number;
-  /** Light modules darkened to join fragments. Each is one module of error. */
-  bridges: number;
-  /** Fragments too small to be worth a bridge, removed instead. */
+  /** Share of the code's dark modules carrying sculpture above the tile. */
+  coverageFraction: number;
+  /** Fragments too small to be worth keeping, cleared instead. */
   droppedSpecks: number;
   /** Columns cut back because they stood clear of everything around them. */
   trimmedColumns: number;
@@ -72,89 +77,24 @@ export interface CarveResult {
   looseParts: number;
 }
 
-/**
- * Join a footprint's components by darkening as few modules as possible.
- *
- * Every component is grown outward simultaneously; where two fronts meet, the
- * two paths back to their sources are the cheapest link between them, and only
- * those cells are darkened. Union-find keeps each merge to the first (shortest)
- * meeting, so the result is close to a minimum spanning set of bridges.
- */
-function bridgeFootprint(
-  foot: Uint8Array, w: number, d: number, allowed: Uint8Array,
-): { bridges: number[] } {
-  const label = new Int32Array(w * d);
-  let comps = 0;
-  const stack: number[] = [];
-  for (let s = 0; s < foot.length; s++) {
-    if (!foot[s] || label[s]) continue;
-    comps++;
-    label[s] = comps;
-    stack.push(s);
-    while (stack.length) {
-      const p = stack.pop()!;
-      const x = p % w, y = Math.floor(p / w);
-      for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < d - 1 ? p + w : -1]) {
-        if (q >= 0 && foot[q] && !label[q]) { label[q] = comps; stack.push(q); }
-      }
-    }
-  }
-  if (comps <= 1) return { bridges: [] };
-
-  const owner = new Int32Array(w * d);
-  const dist = new Int32Array(w * d).fill(-1);
-  const from = new Int32Array(w * d).fill(-1);
-  const queue: number[] = [];
-  for (let i = 0; i < foot.length; i++) {
-    if (foot[i]) { owner[i] = label[i]; dist[i] = 0; queue.push(i); }
-  }
-
-  const parent = new Int32Array(comps + 1);
-  for (let i = 0; i <= comps; i++) parent[i] = i;
-  const find = (a: number): number => {
-    while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; }
-    return a;
-  };
-
-  const bridges = new Set<number>();
-  let remaining = comps;
-  for (let qi = 0; qi < queue.length && remaining > 1; qi++) {
-    const p = queue[qi];
-    const x = p % w, y = Math.floor(p / w);
-    for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < d - 1 ? p + w : -1]) {
-      if (q < 0 || !allowed[q]) continue;
-      if (dist[q] < 0) {
-        dist[q] = dist[p] + 1;
-        owner[q] = owner[p];
-        from[q] = p;
-        queue.push(q);
-      } else if (find(owner[q]) !== find(owner[p])) {
-        parent[find(owner[q])] = find(owner[p]);
-        remaining--;
-        for (let c = p; c >= 0 && !foot[c]; c = from[c]) bridges.add(c);
-        for (let c = q; c >= 0 && !foot[c]; c = from[c]) bridges.add(c);
-      }
-    }
-  }
-  return { bridges: [...bridges] };
-}
-
 export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: number, model: Sdf, opts: CarveOptions): CarveResult {
   const w = qr.w, d = qr.h;
   const spanModules = Math.max(4, Math.min(moduleCount, Math.round(moduleCount * opts.span)));
   const originModule = quietZone + Math.floor((moduleCount - spanModules) / 2);
   const xySub = Math.max(1, Math.round(opts.xySub));
 
-  // Normalise the model into its footprint from the bounds its primitives
-  // carry, so authored coordinates need not be calibrated by hand.
-  const b = model.bounds;
-  let scale = 1, z0 = 0, aspect = 1;
-  if (b && Number.isFinite(b[0]) && b[3] > b[0]) {
-    const radial = Math.max(Math.abs(b[0]), Math.abs(b[3]), Math.abs(b[1]), Math.abs(b[4]));
-    if (radial > 0) scale = 0.5 / radial;
-    z0 = b[2];
-    aspect = Math.max(0.2, (b[5] - b[2]) * scale);
-  }
+  // Normalise the model into its footprint.
+  //
+  // The bounding box its primitives carry is the wrong thing to fit: a whale's
+  // box is as wide as its flukes but its body is half that deep, so fitting the
+  // box leaves the code's near and far edges flat. What has to reach the edges
+  // is the silhouette, so the silhouette is what gets measured -- sampled once,
+  // coarsely, and fitted per axis. A little anisotropy is worth it; a lot is
+  // not, so the two scales are held within a ratio of each other.
+  const fit = fitFootprint(model);
+  const { cx, cy, z0, sx: fitSx, sy: fitSy } = fit;
+  const scale = Math.sqrt(fitSx * fitSy);
+  const aspect = Math.max(0.2, (fit.z1 - fit.z0) * scale);
   const sculptH = Math.max(4, Math.round(spanModules * aspect * opts.zSub));
   const tile = Math.max(1, opts.tileLayers);
   const h = tile + sculptH;
@@ -184,14 +124,14 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
   const sxOrigin = originModule * xySub;
   const tol = 0.45 / (sxSpan * scale);
   for (let z = 0; z < sculptH; z++) {
-    const mz = z0 + ((z + 0.5) / sculptH) * (aspect / scale);
+    const mz = z0 + ((z + 0.5) / sculptH) * (fit.z1 - fit.z0);
     for (let y = 0; y < sxSpan; y++) {
-      const my = ((y + 0.5) / sxSpan - 0.5) / scale;
+      const my = cy + ((y + 0.5) / sxSpan - 0.5) / fitSy;
       const gy = y + sxOrigin;
       for (let x = 0; x < sxSpan; x++) {
         const gx = x + sxOrigin;
         if (!darkAt(gx, gy)) continue;
-        if (model(((x + 0.5) / sxSpan - 0.5) / scale, my, mz) < tol) {
+        if (model(cx + ((x + 0.5) / sxSpan - 0.5) / fitSx, my, mz) < tol) {
           grid.data[(z + tile) * N + gy * W + gx] = 1;
         }
       }
@@ -212,8 +152,8 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
     return false;
   };
 
-  // Bridging stays on the module grid, because a bridge is a module of error in
-  // the code -- there is no such thing as darkening part of a module.
+  // Specks are found on the module grid: a whole module is the smallest thing
+  // worth reasoning about here, and it is what gets cleared.
   const foot = new Uint8Array(w * d);
   for (let z = tile; z < h; z++) {
     for (let sy = 0; sy < D; sy++) {
@@ -223,72 +163,125 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
     }
   }
 
-  // Drop specks before bridging. A fragment one or two modules across costs a
-  // darkened module to reach and contributes almost nothing to the shape, so
-  // paying pattern drift for it is a bad trade. Removing it is safe: the tile
-  // still carries that module, so nothing is left loose -- the sculpture simply
-  // has no material above it.
+  // A fragment one or two modules across contributes nothing to the shape and,
+  // standing over an isolated dark module, tends to be a tall thin sliver that
+  // has to be propped or deleted later anyway. Clearing it here is cheaper and
+  // safe: the skirt still gives that module its height, so the code keeps its
+  // relief -- the sculpture simply has nothing above it there.
   const dropped = dropSpecks(foot, w, 2, (mx, my) => {
     for (let z = tile; z < h; z++) setModule(mx, my, z, 0);
   });
 
-  const allowed = new Uint8Array(w * d);
-  for (let y = originModule; y < originModule + spanModules; y++) {
-    for (let x = originModule; x < originModule + spanModules; x++) allowed[y * w + x] = 1;
-  }
-  const { bridges } = bridgeFootprint(foot, w, d, allowed);
-
   const code = makeBitmap(w, d);
   code.data.set(qr.data);
-  for (const i of bridges) {
-    const mx = i % w, my = Math.floor(i / w);
-    // A bridge is a real dark module: it joins the sculpture, raises the tile
-    // beneath it, and must appear in the code a scanner reads.
-    for (let z = 0; z < tile; z++) setModule(mx, my, z, 1);
-    code.data[(d - 1 - my) * w + mx] = 1;
 
-    // And it has to carry material at the heights its neighbours occupy, or
-    // fragments joined in plan are still adrift in space -- a mushroom cap
-    // floating a dozen layers above the bridge meant to hold it.
-    //
-    // But only where it genuinely joins TWO of them. Filling wherever any one
-    // neighbour happened to have material grew the bridge into a spike beside
-    // whatever it stood next to: measured against a seated cat, nine columns
-    // ended up standing clear of everything around them, the worst by 91
-    // layers. A cell touching one neighbour bridges nothing; it is just a tower.
-    const nb: [number, number][] = [[mx - 1, my], [mx + 1, my], [mx, my - 1], [mx, my + 1]];
-    let topNeeded = -1;
-    for (let z = tile; z < h; z++) {
-      let touching = 0;
-      for (const [nx, ny] of nb) {
-        if (nx < 0 || ny < 0 || nx >= w || ny >= d) continue;
-        if (moduleHas(nx, ny, z)) touching++;
+  // The skirt: ground the sculpture stands on, covering the code edge to edge.
+  //
+  // A sculpture's silhouette is never square. Fit a rocket to the code and it
+  // still only covers a quarter of the dark modules; the rest stay flat tile,
+  // and the print reads as an object placed on a code rather than a code that
+  // is an object. So every dark module the sculpture does not reach gets a
+  // height of its own -- a landform swelling out of the model and falling away
+  // toward the rim, with a low undulation over the far field so the outer
+  // modules are relief rather than plate.
+  //
+  // It costs the code nothing: it only ever adds material above modules that
+  // are already dark, so the view from above is unchanged. And every skirt
+  // column is solid from the tile up, so it needs no support and anchors
+  // whatever sits on it.
+  {
+    const darkMod = new Uint8Array(w * d);
+    for (let y = 0; y < d; y++) for (let x = 0; x < w; x++) darkMod[y * w + x] = phys.data[y * w + x];
+
+    const top = new Int32Array(w * d).fill(-1);
+    for (let my = 0; my < d; my++) {
+      for (let mx = 0; mx < w; mx++) {
+        if (!darkMod[my * w + mx]) continue;
+        for (let z = h - 1; z >= tile; z--) {
+          if (moduleHas(mx, my, z)) { top[my * w + mx] = z; break; }
+        }
       }
-      if (touching >= 2) topNeeded = z;
     }
-    // Contiguous from the tile to the highest junction, so the bridge is a
-    // stub of the sculpture rather than floating segments.
-    for (let z = tile; z <= topNeeded; z++) setModule(mx, my, z, 1);
+
+    // Scaled to the sculpture, not fixed: three layers of undulation reads as
+    // terrain under a thumb-sized figure and as nothing at all under a
+    // hundred-and-forty-layer rocket.
+    const cap = tile + Math.max(2, Math.round(sculptH * 0.28));
+    const reach = Math.max(3, Math.round(spanModules * 0.28));
+    const decay = (cap - tile) / reach;
+    const amp = Math.max(2, Math.round(sculptH * 0.06));
+
+    // Multi-source BFS outward from the sculpture, carrying the height it left
+    // from, so the skirt falls away from whatever it grew out of.
+    const dist = new Int32Array(w * d).fill(-1);
+    const src = new Int32Array(w * d).fill(-1);
+    const queue: number[] = [];
+    for (let i = 0; i < w * d; i++) {
+      if (top[i] >= 0) { dist[i] = 0; src[i] = top[i]; queue.push(i); }
+    }
+    for (let qi = 0; qi < queue.length; qi++) {
+      const p = queue[qi];
+      const x = p % w, y = Math.floor(p / w);
+      for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < d - 1 ? p + w : -1]) {
+        if (q < 0 || !darkMod[q] || dist[q] >= 0) continue;
+        dist[q] = dist[p] + 1;
+        src[q] = src[p];
+        queue.push(q);
+      }
+    }
+
+    for (let my = 0; my < d; my++) {
+      for (let mx = 0; mx < w; mx++) {
+        const i = my * w + mx;
+        if (!darkMod[i]) continue;
+        const ground = tile + Math.round(relief(mx, my) * amp);
+        let t = ground;
+        if (dist[i] >= 0) {
+          const from = Math.min(src[i], cap);
+          t = Math.max(ground, from - Math.round(dist[i] * decay));
+        }
+        // Never bury what is already there.
+        if (top[i] >= 0) t = Math.min(t, Math.max(ground, top[i]));
+        for (let z = tile; z <= t && z < h; z++) setModule(mx, my, z, 1);
+      }
+    }
   }
 
   // A connected footprint does not guarantee a connected solid: two adjacent
   // columns can hold material at heights that never meet. Whatever is still
   // adrift is propped up, one module column each.
   const carvedTotal = countSolid(grid);
-  // Trim needles before propping: a spike deleted here is one that needs no
-  // prop at all.
-  const trimmedColumns = trimSpikes(grid, tile, xySub, 4, setModule);
-  const filledColumns = fillStragglers(grid, tile, xySub, setModule);
-  const after = countSolid(grid);
 
-  // Shave overhangs last, after the props are in.
+  // Trim, prop, shave -- and then again, because each undoes a little of the
+  // last. Shaving is erosion: it eats the canopy around a column and leaves the
+  // column standing proud, so a tree that had no needles before the shave grew
+  // six after it. A second round settles it; a third finds nothing.
   //
-  // Erosion cascades: remove a layer and the one above loses its support too.
-  // Run before propping, that ate a seated cat down to a fifth of itself. Run
-  // after, each prop anchors a 45-degree cone around itself and the shape
-  // mostly survives -- the same reason a real print needs only a few support
-  // towers rather than a solid block.
-  const shaved = opts.selfSupport ? makeSelfSupporting(grid, tile) : 0;
+  // The order within a round matters. A needle trimmed is a needle that needs
+  // no prop, so trimming comes first. Shaving comes last, after the props are
+  // in: run before them it cascades, and it once ate a seated cat down to a
+  // fifth of itself, where afterwards each prop anchors a 45-degree cone around
+  // itself and the shape mostly survives.
+  let trimmedColumns = 0, filledColumns = 0, shaved = 0, after = 0;
+  for (let round = 0; round < 2; round++) {
+    trimmedColumns += trimSpikes(grid, tile, xySub, 4, setModule);
+    filledColumns += fillStragglers(grid, tile, xySub, setModule);
+    if (round === 0) after = countSolid(grid);
+    if (opts.selfSupport) shaved += makeSelfSupporting(grid, tile);
+  }
+
+  // What the code looks like as a solid: the share of it that is sculpted at
+  // all, rather than left as flat plate.
+  let darkModules = 0, covered = 0;
+  for (let my = 0; my < d; my++) {
+    for (let mx = 0; mx < w; mx++) {
+      if (!phys.data[my * w + mx]) continue;
+      darkModules++;
+      for (let z = tile; z < h; z++) {
+        if (moduleHas(mx, my, z)) { covered++; break; }
+      }
+    }
+  }
 
   return {
     grid,
@@ -299,11 +292,81 @@ export function carveSculpture(qr: Bitmap, quietZone: number, moduleCount: numbe
     droppedSpecks: dropped,
     trimmedColumns,
     shavedFraction: carvedTotal ? shaved / carvedTotal : 0,
-    bridges: bridges.length,
+    coverageFraction: darkModules ? covered / darkModules : 0,
     filledColumns,
     fillFraction: carvedTotal ? (after - carvedTotal) / carvedTotal : 0,
     looseParts: componentCount(grid),
   };
+}
+
+/**
+ * A low undulation over the code, in 0..1, so the far field is not a plate.
+ *
+ * Two octaves of value noise on a coarse lattice: smooth enough that
+ * neighbouring modules stay within a step or two of each other, which keeps the
+ * skirt something a printer can lay down, and deterministic so a design rebuilds
+ * identically every time.
+ */
+function relief(mx: number, my: number): number {
+  const hash = (a: number, b: number) => {
+    let n = (a * 374761393 + b * 668265263) | 0;
+    n = (n ^ (n >>> 13)) * 1274126177 | 0;
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967295;
+  };
+  const octave = (L: number, seed: number) => {
+    const gx = Math.floor(mx / L), gy = Math.floor(my / L);
+    const fx = (mx / L) - gx, fy = (my / L) - gy;
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const a = hash(gx + seed, gy), b = hash(gx + 1 + seed, gy);
+    const c = hash(gx + seed, gy + 1), e = hash(gx + 1 + seed, gy + 1);
+    const lo = a + (b - a) * sx, hi = c + (e - c) * sx;
+    return lo + (hi - lo) * sy;
+  };
+  return octave(7, 0) * 0.65 + octave(3, 977) * 0.35;
+}
+
+/**
+ * Measure the model's silhouette and fit it to the code square.
+ *
+ * Sampled coarsely -- a few tens of thousands of field evaluations against the
+ * millions the carve itself does -- and only the top-down silhouette matters,
+ * so a column counts as soon as anything anywhere up its height is inside.
+ */
+function fitFootprint(model: Sdf): { cx: number; cy: number; sx: number; sy: number; z0: number; z1: number } {
+  const b = model.bounds;
+  if (!b || !Number.isFinite(b[0]) || !(b[3] > b[0])) {
+    return { cx: 0, cy: 0, sx: 1, sy: 1, z0: 0, z1: 1 };
+  }
+  const S = 40, H = 28;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let j = 0; j < S; j++) {
+    const my = b[1] + ((j + 0.5) / S) * (b[4] - b[1]);
+    for (let i = 0; i < S; i++) {
+      const mx = b[0] + ((i + 0.5) / S) * (b[3] - b[0]);
+      let hit = false;
+      for (let k = 0; k < H && !hit; k++) {
+        const mz = b[2] + ((k + 0.5) / H) * (b[5] - b[2]);
+        if (model(mx, my, mz) < 0) hit = true;
+      }
+      if (!hit) continue;
+      if (mx < x0) x0 = mx;
+      if (mx > x1) x1 = mx;
+      if (my < y0) y0 = my;
+      if (my > y1) y1 = my;
+    }
+  }
+  if (!Number.isFinite(x0) || x1 <= x0 || y1 <= y0) {
+    const r = Math.max(Math.abs(b[0]), Math.abs(b[3]), Math.abs(b[1]), Math.abs(b[4])) || 1;
+    return { cx: 0, cy: 0, sx: 0.5 / r, sy: 0.5 / r, z0: b[2], z1: b[5] };
+  }
+  // Half a sample of margin each way, so the coarse grid does not clip the
+  // silhouette it was measuring.
+  const px = (x1 - x0) / (S - 1) * 0.5, py = (y1 - y0) / (S - 1) * 0.5;
+  let sx = 0.5 / ((x1 - x0) / 2 + px), sy = 0.5 / ((y1 - y0) / 2 + py);
+  const MAX_ANISO = 1.7;
+  if (sx > sy * MAX_ANISO) sx = sy * MAX_ANISO;
+  if (sy > sx * MAX_ANISO) sy = sx * MAX_ANISO;
+  return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, sx, sy, z0: b[2], z1: b[5] };
 }
 
 /**

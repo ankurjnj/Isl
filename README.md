@@ -26,31 +26,47 @@ Measured on real codes, a carved sculpture comes apart into **20–120 fragments
 
 ### What makes it work anyway
 
-The code does not have to be *perfect*, only decodable. Darkening one light
-module is one module of error, and a QR carries error correction to spare.
+The ground it stands on. Every dark module gets a height of its own: a landform
+swelling out of the sculpture and falling away toward the rim, undulating gently
+over the far field.
 
-So the fragments are joined by darkening as few modules as possible. Every
-fragment is grown outward at once, and where two fronts meet, the two paths back
-to their sources are the cheapest link between them — only those cells are
-darkened, and union-find keeps each merge to the first, shortest meeting. It
-costs about **one module per fragment**: 25–65 extra dark modules scattered
-among thousands, which is **under 1% of the pattern** and indistinguishable from
-it.
+That does two things at once. It covers the code **edge to edge** — no dark
+module left as flat plate, which a silhouette alone can never manage, since even
+fitted to the code a rocket's outline only reaches **23%** of the dark modules
+and a whale's **27%**. And it grounds the fragments as a side effect, because a
+piece resting on the skirt is a piece resting on the plate.
 
-That is the whole trick. A handful of modules of deliberate error buys a
-sculpture that is one connected piece and keeps its real shape.
+The skirt costs the code **nothing**. It only ever adds material above modules
+that are already dark, so the pattern a scanner reads is the QR exactly as
+generated — no error budget spent, nothing for the correction to undo, and no
+span to fit to a budget. An earlier version bought connectivity by darkening
+light modules, roughly one per fragment; that worked, but it spent 1–3% of the
+pattern and four trial carves per build looking for a span the code could
+absorb. The skirt is free and needs neither.
+
+### Fitting the shape to the square
+
+What has to reach the edges is the **silhouette**, not the bounding box. A
+whale's box is as wide as its flukes but half that deep, so fitting the box
+leaves the code's near and far edges bare. So the silhouette is what gets
+measured — sampled once, coarsely, and fitted per axis, with the two scales held
+within a ratio of each other so a little anisotropy is bought and a lot is not.
+That alone lifted a whale from 22% of the dark modules to 57%, a robot from 36%
+to 59%, a cat from 39% to 62%; the skirt takes all fourteen models the rest of
+the way to 100%.
 
 ### Supports, and why there are so few
-
-A bridge also has to carry material at the heights its neighbours occupy. Joining
-fragments only in plan leaves them still adrift in space — a mushroom cap
-floating a dozen layers above the bridge meant to hold it. Filling the bridge
-column through those heights dropped the number of props needed from **22–121
-per model to 0–17**, and the material they add from up to 18% down to under 3%.
 
 Whatever still floats gets exactly **one** column reaching the tile, not all of
 them. Filling every column — which is what grounding does — turns a canopy into
 a solid mass and costs a tree most of its shape; filling one gives it a trunk.
+With the skirt underneath, 0–12 props per model suffice and they add under 2%
+material.
+
+Trim, prop, shave — then again, because each undoes a little of the last.
+Shaving is erosion: it eats the canopy around a column and leaves the column
+standing proud, so a tree with no needles before the shave grew six after it. A
+second round settles it; a third finds nothing.
 
 ### Detail is not limited by the code
 
@@ -60,16 +76,13 @@ projection is still legal — and the tile already raises every dark module, so
 one the sculpture only partly covers still reads dark from above.
 
 So the sculpture is shaped several times finer than the code across, and it
-costs the code nothing: sharpening cells from 2.6 mm to 0.65 mm leaves pattern
-drift unchanged at about 1%. The module grid decides the sculpture's *outline*;
-its surface can be as smooth as the printer can hold.
+costs the code nothing. The module grid decides the sculpture's *outline*; its
+surface can be as smooth as the printer can hold.
 
-The sculpture takes the whole data area by default — finder patterns included,
-only the quiet zone left flat. Confined to a centre square it reads as a lump
-dropped onto a flat pattern; spanning the lot, the code and the sculpture are
-one object. Blocky subjects clamp back a little, because a dense footprint
-fragments into more pieces and the bridges cost more error budget than the code
-can spare.
+The sculpture takes the whole data area — finder patterns included, only the
+quiet zone left flat. Confined to a centre square it reads as a lump dropped
+onto a flat pattern; spanning the lot, the code and the sculpture are one
+object.
 
 ### Printing
 
@@ -79,7 +92,7 @@ and 453 pairs of modules touching only at a corner, with each module just 4
 nozzle widths across.
 
 The answer is not smaller modules but **a wider sculpture on a coarser code**,
-shaped finely within it. A span of 0.72 on a 41-module code gives a 30-module
+shaped finely within it. A 41-module code gives a 41-module
 sculpture at 2.6 mm — 6.5 nozzle widths — against 36 modules at 1.6 mm on a
 65-module one. The tile comes out about the same size either way, because module
 count and module size trade off at a fixed footprint.
@@ -90,11 +103,6 @@ corner-contact counts, and a verdict, all recomputed as the controls move. The
 defaults land on the comfortable side of it. Surface detail finer than one
 extrusion is flagged as *will print smoother than it looks* — it is not a
 structural risk, since these are facets of a solid rather than standalone posts.
-
-Bridges cost error-correction budget, which scales with the code's area while
-the bridges scale with the sculpture's. So the span is fitted the same way the
-rest of this is: ask for what was requested, and step back only if the decoder
-actually objects.
 
 ### The models
 
@@ -141,7 +149,8 @@ at bottom-right.
 
 **The camouflage is asserted, not assumed.** The suite compares what the print
 shows from overhead against the plain code and requires under 4% of modules to
-differ — in practice it is 0.8–1.7%. It separately asserts that *no voxel
+differ — in practice it is zero, since nothing alters the pattern. It separately
+asserts that *no voxel
 anywhere stands over a light module*, which is the property the camouflage
 actually rests on, and that the image verified is the image printed.
 
@@ -153,7 +162,7 @@ touched its stalk, a whale's flukes abutting rather than overlapping the
 peduncle, and a whale stand that stopped short of the body.
 
 **Detail is asserted to cost the code nothing.** Sharpening the sculpture must
-not move the pattern: the suite requires cells four times finer to leave drift
+not move the pattern: the suite requires cells four times finer to leave coverage
 within half a percentage point, and the tile exactly the same size. It also
 asserts that at full span the sculpture covers every module while the quiet zone
 stays completely clear.
@@ -213,7 +222,7 @@ npm run dev          # the app
 npm test             # geometry, orientation, mesh, STL, prompt matching
 npm run test:e2e     # browser: decodes the actual painted pixels (dev server must be running)
 npm run models       # ASCII-render every sculpture
-npm run carve        # bridge, support and decode figures for every model
+npm run carve        # coverage, support and decode figures for every model
 npm run views        # ASCII-render both projections of a build
 ```
 
