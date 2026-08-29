@@ -1,10 +1,10 @@
 import { makeQr } from '../src/lib/qr';
 import { MODELS, getModel, matchModel } from '../src/lib/models3d';
-import { buildFigure, buildTile, countComponents, occludedCode, probeMaxSpan, project } from '../src/lib/voxel';
+import { carveSculpture } from '../src/lib/carve';
 import { buildDesign, DEFAULT_INPUT, exportStl } from '../src/lib/pipeline';
 import { concatMeshes, meshSculpture } from '../src/lib/mesh';
-import { verifyTopView } from '../src/lib/verify';
-import { makeBitmap } from '../src/lib/bitmap';
+import { buildFigure, countComponents, project } from '../src/lib/voxel';
+import { flipY, makeBitmap } from '../src/lib/bitmap';
 import { extrudeSilhouette, revolveSilhouette } from '../src/lib/voxelize';
 
 let failures = 0;
@@ -17,7 +17,7 @@ const payload = 'https://example.com/qr3d';
 const design = (over: Partial<Parameters<typeof buildDesign>[0]> = {}) =>
   buildDesign({ ...DEFAULT_INPUT, payload, model: MODELS[0].sdf, ...over });
 
-console.log('\n== the code still scans with the sculpture standing on it ==');
+console.log('\n== the code still scans with the sculpture carved into it ==');
 for (const text of [
   'https://example.com',
   'https://github.com/ankurjnj/Isl',
@@ -27,95 +27,109 @@ for (const text of [
   for (const ecc of ['Q', 'H'] as const) {
     const d = design({ payload: text, ecc });
     check(`decode v${d.qr.version}-${ecc} (${text.length} chars)`, d.verify.matches,
-      `sculpture covers ${(d.report.coverage * 100).toFixed(0)}% of the code`);
+      `${d.report.bridges} bridges, ${(d.report.driftFraction * 100).toFixed(1)}% drift`);
   }
 }
 
-console.log('\n== every sculpture is one printable piece ==');
-for (const m of MODELS) {
-  const d = design({ model: m.sdf });
-  check(m.id, d.report.looseParts === 1 && d.verify.matches,
-    `${d.report.figureVoxels}³ voxels @ ${d.report.figureVoxelMm.toFixed(2)} mm, ` +
-    `${d.report.overhangs} overhangs, ${d.report.looseParts} piece(s)`);
+console.log('\n== the sculpture camouflages: the top view is still the code ==');
+{
+  // The whole point of carving rather than standing the sculpture on top. What
+  // the print shows from above must be the code itself, not the code with an
+  // object blocking part of it -- so almost every module has to be untouched.
+  for (const id of ['rocket', 'cat', 'tree', 'castle']) {
+    const d = design({ model: getModel(id)!.sdf });
+    const top = flipY(project(d.grid).topAchieved);
+    let diff = 0;
+    for (let i = 0; i < top.data.length; i++) if (top.data[i] !== d.qr.bitmap.data[i]) diff++;
+    const drift = diff / (d.report.moduleCount ** 2);
+    check(`${id}: top view is the code`, drift < 0.04 && d.verify.matches,
+      `${diff} of ${d.report.moduleCount ** 2} modules differ (${(drift * 100).toFixed(1)}%)`);
+    // And what it shows is exactly what was verified.
+    let same = true;
+    for (let i = 0; i < top.data.length; i++) if (top.data[i] !== d.code.data[i]) same = false;
+    check(`${id}: what is verified is what is printed`, same);
+  }
 }
 
-console.log('\n== the sculpture is free of the module grid ==');
+console.log('\n== nothing stands over a light module ==');
 {
-  // The point of standing the sculpture on the code rather than carving it out:
-  // its resolution is set by the printer, not by the size of a QR module.
-  const coarse = design({ subdiv: 1 });
-  const fine = design({ subdiv: 6 });
-  // Resolution tracks the requested detail (up to the voxel budget), never the
-  // module pitch -- which is the whole point of standing the figure on the code.
-  check('detail scales with what was asked, not the module pitch',
-    fine.report.usedSubdiv > coarse.report.usedSubdiv
-    && fine.report.figureVoxels === fine.report.spanModules * fine.report.usedSubdiv,
-    `${coarse.report.usedSubdiv}× -> ${fine.report.usedSubdiv}× per module ` +
-    `(${coarse.report.figureVoxels}³ -> ${fine.report.figureVoxels}³ voxels)`);
-  check('a voxel is finer than a module', fine.report.figureVoxelMm < DEFAULT_INPUT.moduleMm,
-    `${fine.report.figureVoxelMm.toFixed(2)} mm vs ${DEFAULT_INPUT.moduleMm} mm module`);
-  check('the code is unchanged by it', coarse.qr.moduleCount === fine.qr.moduleCount);
-  check('both still decode', coarse.verify.matches && fine.verify.matches);
-}
-
-console.log('\n== the sculpture keeps undercuts a carved one could not ==');
-{
-  // Carving the shape out of the code forces every column to reach the ground,
-  // which is what flattened the old build. A free-standing figure need not.
-  const d = design({ model: getModel('mushroom')!.sdf });
-  const g = d.figure;
-  let undercut = 0;
-  for (let z = 1; z < g.h; z++) {
-    for (let y = 0; y < g.d; y++) {
-      for (let x = 0; x < g.w; x++) {
-        const i = (z * g.d + y) * g.w + x;
-        if (g.data[i] && !g.data[i - g.w * g.d]) undercut++;
-      }
+  // The camouflage rests on this: any material above a light module would be
+  // visible from directly overhead and would corrupt the pattern.
+  const d = design({ model: getModel('rocket')!.sdf });
+  const phys = flipY(d.code);
+  let violations = 0;
+  for (let z = 0; z < d.grid.h; z++) {
+    for (let i = 0; i < d.grid.w * d.grid.d; i++) {
+      if (d.grid.data[z * d.grid.w * d.grid.d + i] && !phys.data[i]) violations++;
     }
   }
-  check('the mushroom cap genuinely overhangs its stalk', undercut > 200, `${undercut} overhanging voxels`);
-  check('and it is still one piece', countComponents(g) === 1);
+  check('every voxel sits over a dark module', violations === 0, `${violations} violations`);
 }
 
-console.log('\n== the sculpture is fitted to its real footprint, not its bounding box ==');
-{
-  // The square probe assumes the sculpture blocks every module in its bounding
-  // box. Slender subjects do not, so fitting against the actual silhouette
-  // should beat that bound -- while blocky ones correctly fall back to it.
+console.log('\n== bridging is cheap, and it is what makes one piece possible ==');
+for (const m of MODELS) {
   const qr = makeQr(payload, 'H', 4, DEFAULT_INPUT.version);
-  const square = probeMaxSpan(qr.bitmap, qr.quietZone, qr.moduleCount, payload);
-  const big = (id: string) => buildDesign({ ...DEFAULT_INPUT, payload, model: getModel(id)!.sdf, span: 0.9 });
-
-  const rocket = big('rocket');
-  check('a slender subject beats the square bound', rocket.report.spanModules > square,
-    `${rocket.report.spanModules} vs ${square} modules`);
-  check('and it still decodes', rocket.verify.matches);
-
-  const blocky = big('house');
-  check('a blocky subject falls back to it', blocky.report.spanModules <= square,
-    `${blocky.report.spanModules} vs ${square} modules`);
-  check('and it decodes too', blocky.verify.matches);
-
-  const small = buildDesign({ ...DEFAULT_INPUT, payload, model: getModel('cat')!.sdf, span: 0.2 });
-  check('a smaller request is honoured, not inflated', small.report.spanModules < square,
-    `asked 20%, got ${small.report.spanModules} modules`);
+  const bare = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, m.sdf,
+    { span: DEFAULT_INPUT.span, zSub: DEFAULT_INPUT.zSub, tileLayers: DEFAULT_INPUT.tileLayers });
+  const d = design({ model: m.sdf });
+  check(m.id, d.report.looseParts === 1 && d.verify.matches && d.report.fillFraction < 0.08,
+    `${bare.bridges} bridges, ${d.report.supports} supports, +${(d.report.fillFraction * 100).toFixed(0)}% material`);
 }
 
-console.log('\n== detail is capped so a large sculpture stays workable ==');
+console.log('\n== supports are minimal, not blanket grounding ==');
 {
-  // Voxel count grows with the cube of span x subdiv. Past the budget the
-  // detail gives way, never the size the user asked for.
-  const d = buildDesign({ ...DEFAULT_INPUT, payload, model: getModel('rocket')!.sdf, span: 0.9, subdiv: 8 });
-  check('detail is reduced rather than the size', d.report.usedSubdiv < 8 && d.report.figureVoxels <= 120,
-    `${d.report.usedSubdiv}× per module, ${d.report.figureVoxels}³ voxels`);
-  check('and the model still holds together', d.report.looseParts === 1 && d.verify.matches);
+  // A floating part needs one column reaching the tile, not all of them.
+  // Filling every column is what turned a tree into a solid mass.
+  const d = design({ model: getModel('tree')!.sdf });
+  check('a tree keeps its shape', d.report.fillFraction < 0.05,
+    `+${(d.report.fillFraction * 100).toFixed(0)}% material from ${d.report.supports} supports`);
+  check('and is still one piece', d.report.looseParts === 1);
+}
+
+console.log('\n== more modules means more detail ==');
+{
+  // x and y are the module grid now, so the code's version IS the sculpture's
+  // resolution -- there is no separate detail axis to turn up.
+  const small = design({ version: 8 });
+  const large = design({ version: 14 });
+  check('a larger code carries a finer sculpture', large.report.spanModules > small.report.spanModules * 1.3,
+    `${small.report.spanModules} -> ${large.report.spanModules} modules across`);
+  check('both decode', small.verify.matches && large.verify.matches);
+}
+
+console.log('\n== printed orientation (mirror check) ==');
+{
+  // A mirrored QR still decodes in jsQR, so decoding proves nothing about
+  // orientation. Finder patterns do: a QR carries them at top-left, top-right
+  // and bottom-left, never bottom-right. Matching the whole 7x7 rather than
+  // sampling its centre -- a single dark module turns up at the empty corner
+  // about half the time, which made the old check pass by luck.
+  const FINDER = [
+    '1111111', '1000001', '1011101', '1011101', '1011101', '1000001', '1111111',
+  ];
+  const d = design();
+  const g = d.grid;
+  const qz = d.qr.quietZone;
+  const n = d.report.moduleCount;
+  // Read the printed tile from above, in physical space.
+  const dark = (x: number, y: number) => g.data[(0 * g.d + y) * g.w + x] === 1;
+  const hasFinder = (cx: number, cy: number) => {
+    for (let r = 0; r < 7; r++) {
+      for (let c = 0; c < 7; c++) {
+        // Physical y runs opposite to the picture's rows.
+        if (dark(qz + cx + c, g.d - 1 - (qz + cy + r)) !== (FINDER[r][c] === '1')) return false;
+      }
+    }
+    return true;
+  };
+  check('finder at top-left', hasFinder(0, 0));
+  check('finder at top-right', hasFinder(n - 7, 0));
+  check('finder at bottom-left', hasFinder(0, n - 7));
+  check('no finder at bottom-right', !hasFinder(n - 7, n - 7));
 }
 
 console.log('\n== 2D input becomes a printable solid ==');
 {
-  // Both adapters can produce disconnected solids from innocuous input: a word
-  // is separate letters, and an outline with a gap revolves into parts that
-  // float. Pruning would then silently delete all but one.
   const two = makeBitmap(64, 64);
   for (let y = 16; y < 48; y++) {
     for (let x = 8; x < 24; x++) two.data[y * 64 + x] = 1;
@@ -135,37 +149,10 @@ console.log('\n== 2D input becomes a printable solid ==');
   check('a gapped outline is held by its spine',
     countComponents(lathe) === 1 && (lathe.islandFraction ?? 0) < 0.01,
     `${((lathe.islandFraction ?? 0) * 100).toFixed(0)}% dropped`);
-}
 
-console.log('\n== occlusion is capped at what the decoder tolerates ==');
-{
-  const qr = makeQr(payload, 'H', 4, 10);
-  const max = probeMaxSpan(qr.bitmap, qr.quietZone, qr.moduleCount, payload);
-  check('a limit is found', max > 4 && max < qr.moduleCount, `${max}/${qr.moduleCount} modules`);
-
-  // One module past the measured limit must actually fail, or the probe is
-  // reporting headroom that is not there.
-  const over = occludedCode(qr.bitmap, buildFigure(() => -1, max + 2, 1, 1), qr.quietZone + Math.floor((qr.moduleCount - (max + 2)) / 2), 1);
-  check('past the limit it stops decoding', !verifyTopView(over, payload).matches);
-
-  const huge = design({ span: 0.95 });
-  check('the app clamps rather than shipping an unscannable model', huge.verify.matches && huge.report.spanModules <= huge.report.maxSpanModules,
-    `asked 95%, got ${huge.report.spanModules}/${huge.report.maxSpanModules} modules`);
-}
-
-console.log('\n== printed orientation (mirror check) ==');
-{
-  // A mirrored QR still decodes in jsQR, so decoding proves nothing about
-  // orientation. Finder patterns do: a QR carries them at top-left, top-right
-  // and bottom-left, never bottom-right.
-  const qr = makeQr(payload, 'H');
-  const tile = buildTile(qr.bitmap, 2);
-  const c = qr.quietZone + 3;
-  const solidAt = (x: number, y: number) => tile.data[(0 * tile.d + y) * tile.w + x] === 1;
-  check('finder at physical top-left', solidAt(c, tile.d - 1 - c));
-  check('finder at physical top-right', solidAt(tile.w - 1 - c, tile.d - 1 - c));
-  check('finder at physical bottom-left', solidAt(c, c));
-  check('no finder at physical bottom-right', !solidAt(tile.w - 1 - c, c));
+  check('both carve into a scannable design',
+    design({ model: extrudeSilhouette(two) }).verify.matches
+    && design({ model: revolveSilhouette(gapped) }).verify.matches);
 }
 
 console.log('\n== the mesh is a closed, correctly-wound solid ==');
@@ -181,33 +168,27 @@ console.log('\n== the mesh is a closed, correctly-wound solid ==');
     }
     return v;
   };
-  for (const id of ['tree', 'rocket', 'cat', 'teapot']) {
-    const m = getModel(id)!;
-    const fig = buildFigure(m.sdf, 20, 3, 1.25);
-    const vox = 0.5;
-    const mesh = meshSculpture(fig, { moduleMm: vox, layerMm: vox, baseMm: 0, withBase: false });
-    let solid = 0; for (const v of fig.data) solid += v;
-    const want = solid * vox ** 3;
-    const eps = Math.max(0.01, want * 1e-4);
-    check(`${id}: closed and outward-wound`, Math.abs(signedVolume(mesh.body) - want) < eps,
-      `${signedVolume(mesh.body).toFixed(1)} vs ${want.toFixed(1)} mm3`);
+  for (const id of ['rocket', 'cat', 'castle']) {
+    const qr = makeQr(payload, 'H', 4, 8);
+    const carved = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, getModel(id)!.sdf,
+      { span: 0.55, zSub: 2, tileLayers: 2 });
+    const mm = 1.5, lm = 0.9;
+    const mesh = meshSculpture(carved.grid, { moduleMm: mm, layerMm: lm, baseMm: 0, withBase: false });
+    let solid = 0; for (const v of carved.grid.data) solid += v;
+    const want = solid * mm * mm * lm;
+    check(`${id}: closed and outward-wound`, Math.abs(signedVolume(mesh.body) - want) < Math.max(0.05, want * 1e-5),
+      `${signedVolume(mesh.body).toFixed(0)} vs ${want.toFixed(0)} mm3`);
   }
-  const tileG = buildTile(makeQr(payload, 'H').bitmap, 2);
-  const tileM = meshSculpture(tileG, { moduleMm: 2, layerMm: 1, baseMm: 2 });
-  check('base plate is a closed box', tileM.base.triangleCount === 12);
 }
 
 console.log('\n== STL export ==');
 {
   const d = design();
   const stl = exportStl(d, 'test');
-  const view = new DataView(stl);
-  const n = view.getUint32(80, true);
+  const n = new DataView(stl).getUint32(80, true);
   check('stl size matches header', stl.byteLength === 84 + n * 50, `${(stl.byteLength / 1024).toFixed(0)} KB, ${n} tris`);
-  check('stl carries both the tile and the sculpture',
-    n === d.meshes.tile.triangleCount + d.meshes.figure.triangleCount + d.meshes.base.triangleCount);
-  const mesh = concatMeshes(d.meshes.tile, d.meshes.figure, d.meshes.base);
-  check('no NaN in positions', mesh.positions.every(Number.isFinite));
+  check('stl carries body and base', n === d.meshes.body.triangleCount + d.meshes.base.triangleCount);
+  check('no NaN in positions', concatMeshes(d.meshes.body, d.meshes.base).positions.every(Number.isFinite));
 }
 
 console.log('\n== prompt matching ==');
@@ -227,6 +208,5 @@ console.log('\n== prompt matching ==');
   check('no false match on gibberish', matchModel('zzz qqq') === null);
 }
 
-void project;
 console.log(failures ? `\n${failures} FAILURES\n` : '\nAll checks passed\n');
 process.exit(failures ? 1 : 0);

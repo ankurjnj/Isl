@@ -39,7 +39,7 @@ export default function App() {
   const [pinned, setPinned] = useState(false);
   const [version, setVersion] = useState(DEFAULT_INPUT.version);
   const [span, setSpan] = useState(DEFAULT_INPUT.span);
-  const [subdiv, setSubdiv] = useState(DEFAULT_INPUT.subdiv);
+  const [zSub, setZSub] = useState(DEFAULT_INPUT.zSub);
   const [ecc, setEcc] = useState<EccLevel>('H');
   const [moduleMm, setModuleMm] = useState(DEFAULT_INPUT.moduleMm);
   const [layerMm, setLayerMm] = useState(DEFAULT_INPUT.layerMm);
@@ -77,9 +77,9 @@ export default function App() {
   // itself forever and rebuild the design on a timer with no input at all.
   const inputs = useMemo<Omit<DesignInput, 'model'> | null>(
     () => (payload.trim()
-      ? { ...DEFAULT_INPUT, payload: payload.trim(), ecc, version, span, subdiv, moduleMm, layerMm, baseMm }
+      ? { ...DEFAULT_INPUT, payload: payload.trim(), ecc, version, span, zSub, moduleMm, layerMm, baseMm }
       : null),
-    [payload, ecc, version, span, subdiv, moduleMm, layerMm, baseMm],
+    [payload, ecc, version, span, zSub, moduleMm, layerMm, baseMm],
   );
   const settledInputs = useSettled(inputs);
   const settledSource = useSettled(source);
@@ -183,11 +183,11 @@ export default function App() {
         </section>
 
         <section className="grid2">
-          <Field label={`Sculpture size — ${design ? `${design.report.spanModules} of ${design.qr.moduleCount} modules` : `${(span * 100).toFixed(0)}%`}`}>
-            <input className="range" type="range" min={0.15} max={0.7} step={0.01} value={span} onChange={(e) => setSpan(+e.target.value)} />
+          <Field label={`Sculpture size — ${design ? `${design.report.spanModules} of ${design.report.moduleCount} modules` : `${(span * 100).toFixed(0)}%`}`}>
+            <input className="range" type="range" min={0.2} max={0.8} step={0.01} value={span} onChange={(e) => setSpan(+e.target.value)} />
           </Field>
-          <Field label={`Detail — ${design?.report.usedSubdiv ?? subdiv}× per module`}>
-            <input className="range" type="range" min={1} max={8} step={1} value={subdiv} onChange={(e) => setSubdiv(+e.target.value)} />
+          <Field label={`Vertical detail — ${zSub}× per module`}>
+            <input className="range" type="range" min={1} max={4} step={1} value={zSub} onChange={(e) => setZSub(+e.target.value)} />
           </Field>
         </section>
 
@@ -200,7 +200,7 @@ export default function App() {
               <option value="H">H — 30%</option>
             </select>
           </Field>
-          <Field label={`Code grid — v${design?.qr.version ?? version}`}>
+          <Field label={`Code grid — v${design?.qr.version ?? version} · ${design?.report.moduleCount ?? '—'} modules`}>
             <input className="range" type="range" min={0} max={20} value={version} onChange={(e) => setVersion(+e.target.value)} />
           </Field>
           <Field label={`Module ${moduleMm.toFixed(1)} mm`}>
@@ -232,11 +232,12 @@ export default function App() {
               </div>
 
               <dl className="stats">
-                <Stat k="Code" v={`v${design.qr.version}-${design.qr.ecc} · ${design.qr.moduleCount}²`} />
-                <Stat k="Tile" v={`${design.dims.widthMm.toFixed(0)} × ${design.dims.depthMm.toFixed(0)} mm`} />
-                <Stat k="Sculpture" v={`${design.dims.figureMm.toFixed(0)} mm · ${design.report.figureVoxels}³ voxels`} />
-                <Stat k="Covers" v={`${(design.report.coverage * 100).toFixed(0)}% of ${design.report.maxSpanModules ? (design.report.maxSpanModules ** 2 / design.qr.moduleCount ** 2 * 100).toFixed(0) : 0}% max`} />
-                <Stat k="Detail" v={`${design.report.figureVoxelMm.toFixed(2)} mm/voxel`} />
+                <Stat k="Code" v={`v${design.qr.version}-${design.qr.ecc} · ${design.report.moduleCount}²`} />
+                <Stat k="Size" v={`${design.dims.widthMm.toFixed(0)} × ${design.dims.depthMm.toFixed(0)} × ${design.dims.heightMm.toFixed(0)} mm`} />
+                <Stat k="Sculpture" v={`${design.report.spanModules} modules · ${design.dims.figureMm.toFixed(0)} mm`} />
+                <Stat k="Pattern drift" v={`${(design.report.driftFraction * 100).toFixed(1)}%`} />
+                <Stat k="Bridges" v={`${design.report.bridges}`} />
+                <Stat k="Supports" v={`${design.report.supports}`} />
                 <Stat k="Pieces" v={`${design.report.looseParts}`} />
                 <Stat k="Triangles" v={`${design.report.triangles.toLocaleString()}`} />
               </dl>
@@ -298,10 +299,10 @@ export default function App() {
           {tab === 'model' && <Viewer design={design} preset={preset} showBase={showBase} />}
           {tab === 'top' && design && (
             <div className="flat">
-              <Projection bitmap={design.occluded} className="proj" />
+              <Projection bitmap={design.code} className="proj" />
               <p className="caption">
-                The code as a scanner sees it, with the sculpture standing on top and blocking part of it.
-                Point your phone at it — this is the same image the built-in verifier decodes.
+                The sculpture carved into the code, seen from directly above. Point your phone at it — this is
+                the same image the built-in verifier decodes.
               </p>
             </div>
           )}
@@ -320,7 +321,7 @@ export default function App() {
 }
 
 function figureSide(design: WorkerDesign) {
-  return project(design.figure).sideAchieved;
+  return project(design.grid).sideAchieved;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

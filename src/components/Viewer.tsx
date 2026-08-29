@@ -139,8 +139,7 @@ export default function Viewer({ design, preset, showBase }: Props) {
     const bodyMat = new THREE.MeshStandardMaterial({ color: 0x191c22, roughness: 0.9, metalness: 0.02 });
     const baseMat = new THREE.MeshStandardMaterial({ color: 0xeef1f6, roughness: 0.85, metalness: 0.0 });
 
-    group.add(make(design.meshes.tile.positions, design.meshes.tile.normals, bodyMat));
-    group.add(make(design.meshes.figure.positions, design.meshes.figure.normals, bodyMat));
+    group.add(make(design.meshes.body.positions, design.meshes.body.normals, bodyMat));
     if (showBase) group.add(make(design.meshes.base.positions, design.meshes.base.normals, baseMat));
 
     const { widthMm, depthMm, heightMm } = design.dims;

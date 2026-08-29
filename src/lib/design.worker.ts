@@ -26,9 +26,9 @@ self.onmessage = (e: MessageEvent<BuildRequest>) => {
       id,
       ok: true as const,
       design: {
-        qr: { ...design.qr, bitmap: design.qr.bitmap },
-        figure: design.figure,
-        occluded: design.occluded,
+        qr: design.qr,
+        grid: design.grid,
+        code: design.code,
         meshes: design.meshes,
         verify: design.verify,
         dims: design.dims,
@@ -37,12 +37,10 @@ self.onmessage = (e: MessageEvent<BuildRequest>) => {
       },
     };
     const transfer: Transferable[] = [
-      design.figure.data.buffer,
-      design.occluded.data.buffer,
+      design.grid.data.buffer,
+      design.code.data.buffer,
       design.qr.bitmap.data.buffer,
-      ...[design.meshes.tile, design.meshes.figure, design.meshes.base].flatMap((m) => [
-        m.positions.buffer, m.normals.buffer,
-      ]),
+      ...[design.meshes.body, design.meshes.base].flatMap((m) => [m.positions.buffer, m.normals.buffer]),
     ];
     (self as unknown as Worker).postMessage(payload, transfer);
   } catch (err) {

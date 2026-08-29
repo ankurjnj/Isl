@@ -8,113 +8,84 @@ Type a link, type a prompt, get an STL.
 
 ## How it works
 
-The print is **two solids sharing one base plate**: a code tile at module
-resolution, and a sculpture at a much finer pitch standing on it.
+The sculpture is **carved out of the code**, so from directly above the print is
+just a QR — no object sitting on it, nothing blocking it. Look at it from any
+other angle and it is a solid 3D model.
 
-That split is the whole design, and it took three attempts to arrive at.
+### The constraint
 
-### Why the sculpture is not carved from the code
+For the code to survive intact from overhead, no material may stand over a light
+module — at any height. That single rule is what makes the camouflage work, and
+it is brutal:
 
-The obvious approach is to make the sculpture *be* the code — intersect a shape
-with the QR and print what survives. It cannot work, and the reason is worth
-stating precisely:
+> Two parts of the sculpture can touch only where their modules are
+> face-adjacent in the code. No horizontal bridging is possible anywhere.
 
-> Anything above the code plane occludes the code. So material may only stand
-> over a dark module, **at any height**. Two parts of such a sculpture can
-> therefore touch only where their modules are face-adjacent in the code — no
-> horizontal bridging is possible anywhere, ever.
+A QR's dark modules are scattered, so carving a shape out of them shatters it.
+Measured on real codes, a carved sculpture comes apart into **20–120 fragments**.
 
-A QR always contains isolated modules, so this shatters the shape. Measured on
-real codes, a carved sculpture came out in **86 to 362 disconnected pieces**.
-The only ways to print that are thin connecting rods, or filling every column
-down to the plate — and filling propagates each column's width downward, which
-flattens the model into a relief and destroys exactly the detail that made it
-recognisable. Both were tried; both are dead ends.
+### What makes it work anyway
 
-### What buys the way out
+The code does not have to be *perfect*, only decodable. Darkening one light
+module is one module of error, and a QR carries error correction to spare.
 
-Error correction. A QR at ECC Q or H reads through roughly a fifth of its area
-being obscured — the same allowance that lets a logo sit in the middle of a
-printed code. So the sculpture does not need to *be* the code. It can simply
-**stand on** it and hide part of it.
+So the fragments are joined by darkening as few modules as possible. Every
+fragment is grown outward at once, and where two fronts meet, the two paths back
+to their sources are the cheapest link between them — only those cells are
+darkened, and union-find keeps each merge to the first, shortest meeting. It
+costs about **one module per fragment**: 25–65 extra dark modules scattered
+among thousands, which is **under 1% of the pattern** and indistinguishable from
+it.
 
-That single change removes every constraint from the sculpture at once:
+That is the whole trick. A handful of modules of deliberate error buys a
+sculpture that is one connected piece and keeps its real shape.
 
-- **Not masked**, so nothing shreds its detail.
-- **Not grounded**, so it keeps undercuts — a cap over a stalk, a canopy over a
-  trunk, a teapot's handle.
-- **Not on the module grid**, so its resolution is set by what the printer can
-  hold, not by the size of a QR module. At the default it is ~80 voxels across
-  at 0.5 mm each.
+### Supports, and why there are so few
 
-The allowance is measured, not assumed: `probeMaxSpan` walks the real decoder
-against the actual code, because the headroom depends on the version, the mask
-pattern and which blocks a given region spans — not just the ECC level's
-nominal rate.
+A bridge also has to carry material at the heights its neighbours occupy. Joining
+fragments only in plan leaves them still adrift in space — a mushroom cap
+floating a dozen layers above the bridge meant to hold it. Filling the bridge
+column through those heights dropped the number of props needed from **22–121
+per model to 0–17**, and the material they add from up to 18% down to under 3%.
 
-That probe assumes the worst case, though: a sculpture blocking *every* module
-in its bounding box. Real ones do not — a rocket or a seated cat covers well
-under half of its own square — so the size is fitted against the sculpture's
-actual footprint, falling back toward the square bound only if the decoder
-really does object. That is worth up to **1.9×** the linear size for slender
-subjects, while blocky ones correctly settle at the conservative bound.
+Whatever still floats gets exactly **one** column reaching the tile, not all of
+them. Filling every column — which is what grounding does — turns a canopy into
+a solid mass and costs a tree most of its shape; filling one gives it a trunk.
+
+### Resolution
+
+Because x and y are the module grid, **the code's version is the sculpture's
+resolution**. A bigger code carries a finer sculpture; there is no separate
+detail axis to turn up. Only the vertical axis is free of the grid, so height
+can be subdivided for smoother profiles.
 
 ### The models
 
 Composed from signed-distance primitives — cones, frustums, capsules, boxes,
-tapered blades — and voxelised. Because they are free-standing, they can have
-the things that make an object recognisable: a rocket has a flared engine bell,
-a stage band, a porthole and four swept fins; a cat has ears, a muzzle, front
-legs, paws and a curled tail; a tree has a trunk under a lumpy canopy.
-
-Models are normalised into their footprint using the bounds their primitives
-carry, so authored coordinates need not be calibrated by hand and every model
-fills the space it is given, with its height following from its own proportions.
-
-Two things keep voxelisation honest. Samples are accepted slightly outside the
-surface, which rescues features thinner than the voxel pitch — a fin, an ear, a
-railing post — for one evaluation instead of the eight that supersampling would
-cost. And because that tolerance can strand a speck a voxel or two across near
-the rim of a subtracted cavity, only the largest connected body is kept, with
-the discarded fraction reported so a genuine modelling error (a limb that fails
-to meet the body) is surfaced rather than quietly deleted.
+tapered blades — and normalised into their footprint using the bounds their
+primitives carry. A rocket has a flared engine bell, a stage band, a porthole and
+four swept fins; a cat has ears, a muzzle, front legs, paws and a curled tail; a
+tree has a trunk under a lumpy canopy.
 
 ### Staying responsive
 
-A build is voxelisation plus a QR decode — a second or more of synchronous work,
-and up to three attempts when the size is being fitted. Two things keep the page
-usable:
-
-- **Edits are debounced**, so dragging a slider coalesces into one build rather
-  than one per frame.
-- **Builds run in a worker**, inlined into the bundle (`?worker&inline`) because
-  the app also ships as one self-contained HTML file, where a separate worker
-  chunk would have nothing to load from. Only the newest request is kept, so a
-  slow build started before the last edit cannot overwrite a newer result.
-
-Model closures cannot cross a worker boundary, so the build's input names the
-*source* — a library id, or the bitmap behind a lathe or a word — rather than
-carrying the function itself.
-
-Voxel count grows with the cube of size × detail, so past a budget the **detail**
-gives way rather than the size: the size is what was asked for, the detail is a
-preference.
-
-### Printability
-
-- **One piece**, asserted for every model in the suite.
-- **Overhangs are allowed** and counted; the sculpture needs supports, the tile
-  does not.
-- **A base plate**, which gives a scanner its contrast — light plate, dark code.
-- **Greedy quad meshing**, cutting a naive six-quads-per-voxel mesh by an order
-  of magnitude without changing the shape.
+A build is voxelisation plus a QR decode. Edits are debounced so a slider drag
+coalesces into one build, and builds run in a worker — inlined into the bundle
+(`?worker&inline`) because the app also ships as one self-contained HTML file,
+where a separate worker chunk would have nothing to load from. Only the newest
+request is kept. Model closures cannot cross a worker boundary, so the input
+names the *source* — a library id, or the bitmap behind a lathe or a word.
 
 ### Supplying the subject
 
 1. **A prompt**, matched against the model library.
-2. **An uploaded image**, turned on a lathe — a real solid rather than a slab.
-3. **A word**, cast as raised lettering. The one extruded case, because
-   extruded lettering is what 3D text actually *is*.
+2. **An uploaded image**, turned on a lathe — a real solid rather than a slab,
+   held together by a slim axial spine so an outline with a gap in it does not
+   revolve into floating parts.
+3. **A word**, cast as raised lettering on a plinth, because separate letters
+   are separate solids and a word without one prints as loose glyphs. This is
+   the only extruded case, since extruded lettering is what 3D text actually
+   *is*.
 
 ## Verification
 
@@ -131,22 +102,26 @@ suites assert on finder-pattern corners instead, which are asymmetric by
 construction — a QR has them at top-left, top-right and bottom-left, and never
 at bottom-right.
 
-**The occlusion limit is measured against the real decoder, in both
-directions.** The suite asserts not only that the chosen footprint decodes, but
-that one module *past* the probe's answer stops decoding — otherwise the probe
-would be reporting headroom that is not there.
+**The camouflage is asserted, not assumed.** The suite compares what the print
+shows from overhead against the plain code and requires under 4% of modules to
+differ — in practice it is under 1%. It separately asserts that *no voxel
+anywhere stands over a light module*, which is the property the camouflage
+actually rests on, and that the image verified is the image printed.
 
 **"Prints in one piece" is not a claim you can eyeball.** Every model is
 asserted to come out at exactly one connected body (6-connected: voxels meeting
-at an edge or a corner are not a printable weld). This caught three real
-modelling errors — a mushroom cap that only touched its stalk, a whale's flukes
-abutting rather than overlapping the peduncle, and a whale stand that stopped
-short of the body.
+at an edge or a corner are not a printable weld), with the supports adding under
+8% material. This caught three real modelling errors — a mushroom cap that only
+touched its stalk, a whale's flukes abutting rather than overlapping the
+peduncle, and a whale stand that stopped short of the body.
 
-**Detail is asserted to be independent of the code.** Raising the sculpture's
-resolution must change its voxel count without touching the code's module
-count — that separation is the entire point of standing the figure on the tile
-rather than carving it from it.
+**Finder patterns are matched in full, not sampled.** A QR carries them at
+top-left, top-right and bottom-left and never at bottom-right, which is what
+makes them a mirror test. Sampling a corner's centre is not enough: a lone dark
+module turns up at the empty corner about half the time, so that check passed or
+failed by luck depending on the code. The whole 7×7 is matched instead — in the
+flat projection and, by locating the base plate first, in the rendered 3D
+geometry too.
 
 **Responsiveness is a controlled comparison, not a threshold.** The suite
 measures the worst gap between animation frames while idle, then again during a
@@ -178,7 +153,8 @@ npm install
 npm run dev          # the app
 npm test             # geometry, orientation, mesh, STL, prompt matching
 npm run test:e2e     # browser: decodes the actual painted pixels (dev server must be running)
-npm run models       # ASCII-render every sculpture, with piece and overhang counts
+npm run models       # ASCII-render every sculpture
+npm run carve        # bridge, support and decode figures for every model
 npm run views        # ASCII-render both projections of a build
 ```
 
@@ -227,8 +203,9 @@ skull gets its eye sockets.
 src/lib/
   sdf.ts          3D distance primitives, combinators, bounds-culled union
   models3d.ts     the sculptures, and the prompt matcher
+  carve.ts        carving, bridging, and minimal supports
   voxelize.ts     lathe and lettering adapters for 2D input
-  voxel.ts        tile, figure, occlusion, and the decode-limit probe
+  voxel.ts        voxel grids, projection, connectivity
   bitmap.ts       binary rasters, fitting, projection helpers
   qr.ts           QR module matrix, quiet zone included
   path.ts         SVG path parser and bezier flattener

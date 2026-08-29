@@ -1,10 +1,8 @@
 import { Bitmap } from './bitmap';
 import { EccLevel, makeQr, QrResult } from './qr';
 import { concatMeshes, meshSculpture, Mesh } from './mesh';
-import {
-  buildFigure, buildTile, countComponents, countOverhangs,
-  occludedCode, probeMaxSpan, VoxelGrid,
-} from './voxel';
+import { carveSculpture } from './carve';
+import { countOverhangs, VoxelGrid } from './voxel';
 import { meshToObj, meshToStl } from './stl';
 import { verifyTopView, VerifyResult } from './verify';
 import { Sdf } from './sdf';
@@ -15,15 +13,12 @@ export interface DesignInput {
   quietZone: number;
   /** Force a larger module grid than the payload needs. 0 = smallest that fits. */
   version: number;
-  /** The sculpture. */
   model: Sdf;
   /** Sculpture footprint, as a fraction of the code's width. */
   span: number;
-  /** Sculpture voxels per code module. Its resolution, independent of the code. */
-  subdiv: number;
-  /** Sculpture height as a multiple of its width. */
-  heightScale: number;
-  /** Layers of raised code on the plate. */
+  /** Vertical voxels per module: the one axis not tied to the module grid. */
+  zSub: number;
+  /** Layers of raised code beneath the sculpture. */
   tileLayers: number;
   moduleMm: number;
   layerMm: number;
@@ -38,56 +33,42 @@ export interface Dimensions {
 }
 
 export interface DesignReport {
-  /** Modules the sculpture covers, what was asked for, and whether it was cut back. */
+  moduleCount: number;
+  /** Modules the sculpture spans. Its resolution, since x and y are the grid. */
   spanModules: number;
-  requestedSpan: number;
-  maxSpanModules: number;
-  clamped: boolean;
-  /** Fraction of the code's area the sculpture stands on. */
-  coverage: number;
-  /** Sculpture voxels across. Its real resolution. */
-  figureVoxels: number;
-  /** Voxels per module actually used, after the budget cap. */
-  usedSubdiv: number;
-  figureVoxelMm: number;
-  /** Overhangs in the sculpture. Non-zero is fine; it just needs supports. */
-  overhangs: number;
-  /** Sculpture pieces. Must be 1. */
+  /** Light modules darkened to join the sculpture. Each is one module of error. */
+  bridges: number;
+  /** How far the top view departs from the plain code. */
+  driftFraction: number;
+  /** Supports added under parts that reached nothing. One column each. */
+  supports: number;
+  /** Voxels those supports added, against the carved total. */
+  fillFraction: number;
   looseParts: number;
-  /** Share of the model dropped as disconnected specks. */
-  islandFraction: number;
+  overhangs: number;
   triangles: number;
 }
 
-/**
- * Everything the UI needs. Separate from `Design` because the tile's voxel grid
- * is only an intermediate for meshing -- nothing downstream reads it, and
- * leaving it out keeps the result cheap to hand across a worker boundary.
- */
 export interface DesignView {
   qr: QrResult;
-  figure: VoxelGrid;
-  /** The code as a scanner sees it, with the sculpture blocking part of it. */
-  occluded: Bitmap;
-  meshes: { tile: Mesh; figure: Mesh; base: Mesh };
+  grid: VoxelGrid;
+  /** The code as a scanner sees it: the original plus the bridges. */
+  code: Bitmap;
+  meshes: { body: Mesh; base: Mesh };
   verify: VerifyResult;
   dims: Dimensions;
   report: DesignReport;
   warnings: string[];
 }
 
-export interface Design extends DesignView {
-  /** The code tile's voxels. Meshing input only. */
-  tile: VoxelGrid;
-}
+export type Design = DesignView;
 
 export const DEFAULT_INPUT: Omit<DesignInput, 'model' | 'payload'> = {
   ecc: 'H',
   quietZone: 4,
-  version: 10,
-  span: 0.45,
-  subdiv: 3,
-  heightScale: 1,
+  version: 12,
+  span: 0.55,
+  zSub: 2,
   tileLayers: 2,
   moduleMm: 1.6,
   layerMm: 0.8,
@@ -96,95 +77,49 @@ export const DEFAULT_INPUT: Omit<DesignInput, 'model' | 'payload'> = {
 
 export function buildDesign(input: DesignInput): Design {
   const qr = makeQr(input.payload, input.ecc, input.quietZone, input.version || undefined);
-  const n = qr.moduleCount;
 
-  // The square probe is the guaranteed-safe floor: it assumes the sculpture
-  // blocks every module in its bounding box. Real sculptures do not -- a rocket
-  // or a seated cat covers well under half of its own square -- so clamping to
-  // that figure leaves a lot of size on the table. Try the requested size
-  // against the sculpture's ACTUAL footprint first, and only fall back toward
-  // the square bound if the decoder really does object.
-  const safeSpan = Math.max(4, probeMaxSpan(qr.bitmap, qr.quietZone, n, input.payload));
-  const wanted = Math.max(4, Math.min(n, Math.round(n * input.span)));
+  const carved = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, input.model, {
+    span: input.span,
+    zSub: input.zSub,
+    tileLayers: input.tileLayers,
+  });
 
-  // Cap the sculpture's grid. Voxel count grows with the cube of span x subdiv,
-  // so a large sculpture at high detail is minutes of work and a mesh nothing
-  // will open. Past the budget the detail is reduced rather than the size --
-  // the size is what the user asked for, the detail is a preference.
-  const VOXEL_BUDGET = 108;
-  const effectiveSubdiv = (span: number) =>
-    Math.max(1, Math.min(input.subdiv, Math.floor(VOXEL_BUDGET / Math.max(1, span))));
+  // The code a scanner reads is the one with the bridges in it, so that is what
+  // gets verified -- not the pristine code we started from.
+  const verify = verifyTopView(carved.code, input.payload);
 
-  const attempt = (span: number) => {
-    const sub = effectiveSubdiv(span);
-    const fig = buildFigure(input.model, span, sub, input.heightScale);
-    const origin = qr.quietZone + Math.floor((n - span) / 2);
-    const occ = occludedCode(qr.bitmap, fig, origin, sub);
-    return { span, sub, fig, origin, occ, verify: verifyTopView(occ, input.payload) };
-  };
-
-  let best = attempt(wanted);
-  // Below the square bound the code is safe whatever shape stands on it, so
-  // there is nothing to search for.
-  if (!best.verify.matches && wanted > safeSpan) {
-    // Bisect once between the failure and the guaranteed floor, then settle for
-    // the floor. Each step costs a full voxelisation, so this trades a little
-    // size for staying responsive rather than searching exhaustively.
-    const mid = Math.floor((safeSpan + best.span) / 2);
-    if (mid > safeSpan) {
-      const tryMid = attempt(mid);
-      if (tryMid.verify.matches) best = tryMid;
-    }
-    if (!best.verify.matches) best = attempt(safeSpan);
-  }
-
-  const { span: spanModules, sub: usedSubdiv, fig: figure, origin: originModule, occ: occluded, verify } = best;
-  const maxSpanModules = Math.max(safeSpan, spanModules);
-  const tile = buildTile(qr.bitmap, input.tileLayers);
-
-  // The sculpture's voxel is finer than a module, and cubic, so the figure
-  // keeps its proportions instead of being stretched by the tile's layer height.
-  const figureVoxelMm = input.moduleMm / usedSubdiv;
-  const originMm: [number, number, number] = [
-    originModule * input.moduleMm,
-    originModule * input.moduleMm,
-    input.baseMm,
-  ];
-
-  const tileMesh = meshSculpture(tile, {
+  const meshed = meshSculpture(carved.grid, {
     moduleMm: input.moduleMm, layerMm: input.layerMm, baseMm: input.baseMm,
     origin: [0, 0, input.baseMm], withBase: true,
   });
-  const figureMesh = meshSculpture(figure, {
-    moduleMm: figureVoxelMm, layerMm: figureVoxelMm, baseMm: 0,
-    origin: originMm, withBase: false,
-  });
+
+  let drift = 0;
+  for (let i = 0; i < carved.code.data.length; i++) {
+    if (carved.code.data[i] !== qr.bitmap.data[i]) drift++;
+  }
 
   const dims: Dimensions = {
-    widthMm: tile.w * input.moduleMm,
-    depthMm: tile.d * input.moduleMm,
-    heightMm: input.baseMm + figure.h * figureVoxelMm,
-    figureMm: figure.w * figureVoxelMm,
+    widthMm: carved.grid.w * input.moduleMm,
+    depthMm: carved.grid.d * input.moduleMm,
+    heightMm: input.baseMm + carved.grid.h * input.layerMm,
+    figureMm: carved.spanModules * input.moduleMm,
   };
 
   const report: DesignReport = {
-    spanModules,
-    requestedSpan: wanted,
-    clamped: spanModules < wanted,
-    maxSpanModules,
-    coverage: (spanModules * spanModules) / (n * n),
-    figureVoxels: figure.w,
-    usedSubdiv,
-    figureVoxelMm,
-    overhangs: countOverhangs(figure),
-    looseParts: countComponents(figure),
-    islandFraction: figure.islandFraction ?? 0,
-    triangles: tileMesh.body.triangleCount + figureMesh.body.triangleCount + tileMesh.base.triangleCount,
+    moduleCount: qr.moduleCount,
+    spanModules: carved.spanModules,
+    bridges: carved.bridges,
+    driftFraction: drift / (qr.moduleCount * qr.moduleCount),
+    supports: carved.filledColumns,
+    fillFraction: carved.fillFraction,
+    looseParts: carved.looseParts,
+    overhangs: countOverhangs(carved.grid),
+    triangles: meshed.body.triangleCount + meshed.base.triangleCount,
   };
 
   return {
-    qr, tile, figure, occluded,
-    meshes: { tile: tileMesh.body, figure: figureMesh.body, base: tileMesh.base },
+    qr, grid: carved.grid, code: carved.code,
+    meshes: { body: meshed.body, base: meshed.base },
     verify, dims, report,
     warnings: collectWarnings(input, report, verify, dims),
   };
@@ -199,7 +134,8 @@ function collectWarnings(
     w.push(
       verify.decoded
         ? 'The top view decodes to different data than you entered. Do not print this.'
-        : 'The top view did not decode. Shrink the sculpture, or raise the error-correction level.',
+        : 'The top view did not decode — the sculpture needed more bridges than this code can absorb. ' +
+          'Shrink it, or raise the code version for more room.',
     );
   }
   // 1.2 mm is the widely cited floor for a printed module to survive nozzle
@@ -207,38 +143,23 @@ function collectWarnings(
   if (input.moduleMm < 1.2) {
     w.push(`Modules are ${input.moduleMm} mm. Below about 1.2 mm a printed code usually stops scanning.`);
   }
-  // A 0.4 mm nozzle cannot resolve a feature thinner than its own bead.
-  if (report.figureVoxelMm < 0.4) {
-    w.push(
-      `Sculpture voxels are ${report.figureVoxelMm.toFixed(2)} mm — finer than a 0.4 mm nozzle can print. ` +
-      'Lower the detail, or raise the module size.',
-    );
-  }
-  // Specks are sampling noise; losing a real share of the model is a modelling
-  // error and must not pass silently.
-  if (report.islandFraction > 0.02) {
-    w.push(
-      `${(report.islandFraction * 100).toFixed(1)}% of this model was disconnected from its body and dropped — ` +
-      'part of the shape is not joined to the rest.',
-    );
-  }
-  if (report.usedSubdiv < input.subdiv) {
-    w.push(
-      `Detail was reduced to ${report.usedSubdiv}× per module to keep the sculpture's grid workable at this size. ` +
-      'A smaller sculpture can carry more detail.',
-    );
-  }
   if (report.looseParts > 1) {
     w.push(`The sculpture is in ${report.looseParts} disconnected pieces and will not print as one object.`);
   }
-  if (report.overhangs > 0) {
-    w.push(`The sculpture has ${report.overhangs} overhanging voxels — print it with supports.`);
-  }
-  if (report.clamped) {
+  if (report.fillFraction > 0.25) {
     w.push(
-      `The sculpture is capped at ${report.spanModules} of ${report.requestedSpan} modules — any larger and this ` +
-      'code stops decoding. A longer payload or a higher code version gives more room.',
+      `Supporting this shape added ${(report.fillFraction * 100).toFixed(0)}% more material — it has parts ` +
+      'floating well clear of anything beneath them, and they are being propped up to the tile.',
     );
+  }
+  if (report.driftFraction > 0.04) {
+    w.push(
+      `${(report.driftFraction * 100).toFixed(1)}% of the code was darkened to hold the sculpture together. ` +
+      'It still scans, but a smaller sculpture or a larger code would leave the pattern cleaner.',
+    );
+  }
+  if (report.overhangs > 0) {
+    w.push(`${report.overhangs} overhanging voxels — print with supports, or accept some droop.`);
   }
   if (input.baseMm < 0.8) w.push('The base plate is very thin and may warp or tear off the bed.');
   if (Math.max(dims.widthMm, dims.depthMm) > 250) {
@@ -248,22 +169,22 @@ function collectWarnings(
 }
 
 export function exportStl(design: DesignView, name: string): ArrayBuffer {
-  return meshToStl(concatMeshes(design.meshes.tile, design.meshes.figure, design.meshes.base), name);
+  return meshToStl(concatMeshes(design.meshes.body, design.meshes.base), name);
 }
 
 export function exportObj(design: DesignView): string {
-  return meshToObj(concatMeshes(design.meshes.tile, design.meshes.figure, design.meshes.base));
+  return meshToObj(concatMeshes(design.meshes.body, design.meshes.base));
 }
 
 export function printingNotes(input: Omit<DesignInput, 'model'>, design: DesignView): string[] {
   return [
     `Insert a filament change at Z = ${input.baseMm.toFixed(2)} mm. Below it is the base plate — use a light colour. Above it is the code and the sculpture — use a dark, matte colour.`,
     design.report.overhangs === 0
-      ? 'No supports needed: nothing in the sculpture overhangs.'
-      : `Enable supports for the sculpture (${design.report.overhangs} overhanging voxels). Keep them off the code — the tile needs none.`,
-    `The sculpture's detail is ${design.report.figureVoxelMm.toFixed(2)} mm per voxel; use a layer height at or below that to keep it.`,
-    `Tile ${design.dims.widthMm.toFixed(0)} × ${design.dims.depthMm.toFixed(0)} mm, sculpture ${design.dims.figureMm.toFixed(0)} mm across, ${design.dims.heightMm.toFixed(0)} mm tall overall.`,
+      ? 'No supports needed: nothing overhangs.'
+      : `Enable supports (${design.report.overhangs} overhanging voxels). They only touch the sculpture; the code tile needs none.`,
+    `Modules are ${input.moduleMm} mm and layers ${input.layerMm} mm, so use a layer height that divides ${input.layerMm} mm evenly.`,
+    `${design.dims.widthMm.toFixed(0)} × ${design.dims.depthMm.toFixed(0)} mm tile, ${design.dims.heightMm.toFixed(0)} mm tall, sculpture ${design.dims.figureMm.toFixed(0)} mm across.`,
     'Matte filament scans far better than glossy — specular highlights are what usually defeat a scanner on a printed code.',
-    'Scan straight down, with diffuse light. The code reads from above; the sculpture is what you see from anywhere else.',
+    'Scan straight down, with diffuse light. From above it is a code; from anywhere else it is the sculpture.',
   ];
 }
