@@ -52,7 +52,7 @@ leaves the code's near and far edges bare. So the silhouette is what gets
 measured — sampled once, coarsely, and fitted per axis, with the two scales held
 within a ratio of each other so a little anisotropy is bought and a lot is not.
 That alone lifted a whale from 22% of the dark modules to 57%, a robot from 36%
-to 59%, a cat from 39% to 62%; the skirt takes all fourteen models the rest of
+to 59%, a cat from 39% to 62%; the skirt takes every prompt the rest of
 the way to 100%.
 
 ### Supports, and why there are so few
@@ -104,13 +104,42 @@ defaults land on the comfortable side of it. Surface detail finer than one
 extrusion is flagged as *will print smoother than it looks* — it is not a
 structural risk, since these are facets of a solid rather than standalone posts.
 
-### The models
+### The sculpture is assembled, not chosen
 
-Composed from signed-distance primitives — cones, frustums, capsules, boxes,
-tapered blades — and normalised into their footprint using the bounds their
-primitives carry. A rocket has a flared engine bell, a stage band, a porthole and
-four swept fins; a cat has ears, a muzzle, front legs, paws and a curled tail; a
-tree has a trunk under a lumpy canopy.
+There is no model library. A prompt is read as three independent things — a
+**body plan**, a set of **attachments**, and something it **stands on** — and
+the sculpture is built from them.
+
+A plan lays down a body and publishes the handful of places anything else could
+sensibly attach: the head and its radius, the face, the shoulders, the
+hindquarters, a hand. Twenty plans cover seated and standing quadrupeds, bipeds
+blocky and soft, birds with and without a neck, swimmers on a stand, four kinds
+of plant, five kinds of building and four vehicles. Attachments are written
+against those handles rather than against coordinates, which is why a crown
+written once fits a cat, a dragon and a robot.
+
+```
+"a dragon with a crown riding a rocket"
+   dragon  -> quadrupedStanding + horns, batWings, curlTail, snout
+   crown   -> crown, on the head anchor
+   riding  -> mount: rocket, scaled down and lifted to meet the feet
+```
+
+Adjectives turn four knobs — height, girth, leg length, neck length — and they
+multiply rather than replace, so a tall chubby bear is both and is still built
+like a bear. Word order carries meaning the vocabulary cannot: the subject is
+the earliest noun, so a cat riding a rocket is a cat, while a rocket on its own
+is a rocket.
+
+Everything is signed-distance primitives — cones, frustums, capsules,
+ellipsoids, tapered blades, Bezier chains of shrinking spheres for tails —
+smooth-unioned so joints read as fillets rather than as parts stuck together.
+The assembly is measured and scaled into the carver's box once at the end,
+rather than every recipe being hand-tuned to land in the same place.
+
+The one hard rule is that the whole thing must come out as a single connected
+body, so every attachment overlaps its host rather than touching it, and the
+suite voxelises every example to assert it.
 
 ### Staying responsive
 
@@ -119,11 +148,12 @@ coalesces into one build, and builds run in a worker — inlined into the bundle
 (`?worker&inline`) because the app also ships as one self-contained HTML file,
 where a separate worker chunk would have nothing to load from. Only the newest
 request is kept. Model closures cannot cross a worker boundary, so the input
-names the *source* — a library id, or the bitmap behind a lathe or a word.
+names the *source* — an assembly recipe, or the bitmap behind a lathe or a word
+— and the worker rebuilds the solid from it.
 
 ### Supplying the subject
 
-1. **A prompt**, matched against the model library.
+1. **A prompt**, assembled into a sculpture (above).
 2. **An uploaded image**, turned on a lathe — a real solid rather than a slab,
    held together by a slim axial spine so an outline with a gap in it does not
    revolve into floating parts.
@@ -221,7 +251,8 @@ npm install
 npm run dev          # the app
 npm test             # geometry, orientation, mesh, STL, prompt matching
 npm run test:e2e     # browser: decodes the actual painted pixels (dev server must be running)
-npm run models       # ASCII-render every sculpture
+npm run models       # ASCII-render every example sculpture
+npm run compose      # front and profile of any prompt: npm run compose 'a fox'
 npm run carve        # coverage, support and decode figures for every model
 npm run views        # ASCII-render both projections of a build
 ```
@@ -251,9 +282,10 @@ The app computes these for your actual settings, under *How to print it*:
 
 Three ways, in the order the app tries them:
 
-1. **A prompt.** Matched against a library of 26 hand-authored silhouettes,
-   scoring whole words above substrings so "startup rocket" is not beaten by an
-   incidental match inside another word.
+1. **A prompt.** Read into a body plan, its attachments and what it stands on,
+   then assembled. Longer phrases are matched first and struck out of the text,
+   so "top hat" is never read as "hat" and "a bushy tail" does not also match
+   the plain-tail rule and hang a second tail off the same animal.
 2. **An uploaded image.** Thresholded to a silhouette; transparent PNGs work
    directly, and there is an invert toggle for light-on-dark art.
 3. **A word.** If nothing matches, the first word of the prompt is extruded,
@@ -270,8 +302,9 @@ skull gets its eye sockets.
 ```
 src/lib/
   sdf.ts          3D distance primitives, combinators, bounds-culled union
-  models3d.ts     the sculptures, and the prompt matcher
-  carve.ts        carving, bridging, speck-dropping, minimal supports
+  anatomy.ts      body plans, their anchors, attachments and mounts
+  compose.ts      prompt -> recipe -> solid, and the example prompts
+  carve.ts        carving, the skirt, speck-dropping, minimal supports
   printability.ts what an FDM printer will make of it
   voxelize.ts     lathe and lettering adapters for 2D input
   voxel.ts        voxel grids, projection, connectivity

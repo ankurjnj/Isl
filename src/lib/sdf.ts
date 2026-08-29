@@ -197,3 +197,52 @@ export function taperedBox(
     return Math.max(Math.abs(x - cx) - hh, Math.abs(y - cy) - hh, Math.max(z0 - z, z - z1));
   }, [cx - h, cy - h, z0, cx + h, cy + h, z1]);
 }
+
+/** Shift a part along z -- lifting a subject onto whatever it stands on. */
+export function translateZ(dz: number, part: Sdf): Sdf {
+  const fn = (x: number, y: number, z: number) => part(x, y, z - dz);
+  if (!part.bounds) return fn as Sdf;
+  const b = part.bounds;
+  return withBounds(fn, [b[0], b[1], b[2] + dz, b[3], b[4], b[5] + dz]);
+}
+
+/**
+ * Scale a part about the origin. Distances scale with it, so the result is
+ * still a true distance field rather than a merely correctly-signed one.
+ */
+export function scaled(k: number, part: Sdf): Sdf {
+  const fn = (x: number, y: number, z: number) => part(x / k, y / k, z / k) * k;
+  if (!part.bounds) return fn as Sdf;
+  const b = part.bounds;
+  return withBounds(fn, [b[0] * k, b[1] * k, b[2] * k, b[3] * k, b[4] * k, b[5] * k]);
+}
+
+/**
+ * Rotate a part about the y axis -- leaning a mast, canting a wing.
+ *
+ * No bound is derived: the callers that need one wrap the result in a `union`,
+ * which falls back to evaluating every part when any bound is missing.
+ */
+export function rotateY(angle: number, part: Sdf): Sdf {
+  const c = Math.cos(-angle), s = Math.sin(-angle);
+  return (x, y, z) => part(x * c + z * s, y, -x * s + z * c);
+}
+
+/**
+ * Fit a composed model into the space the carver expects: x and y within
+ * [-0.5, 0.5], z from 0 up.
+ *
+ * Assembled models are authored in whatever units read naturally for the part
+ * at hand, and a subject standing on a mount is taller than one standing on the
+ * ground. Rather than hand-tuning every recipe to land in the same box, the
+ * assembly is measured and scaled once at the end.
+ */
+export function fitToSpace(part: Sdf): Sdf {
+  const b = part.bounds;
+  if (!b || !Number.isFinite(b[0])) return part;
+  const radial = Math.max(Math.abs(b[0]), Math.abs(b[3]), Math.abs(b[1]), Math.abs(b[4]));
+  const tall = b[5] - b[2];
+  // Whichever is tighter: half a unit across, or a unit tall.
+  const k = Math.min(radial > 0 ? 0.5 / radial : 1, tall > 0 ? 1 / tall : 1);
+  return translateZ(-b[2] * k, scaled(k, part));
+}

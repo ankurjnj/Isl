@@ -1,4 +1,4 @@
-import { getModel } from '../src/lib/models3d';
+import { sculpt } from '../src/lib/compose';
 import { buildDesign, DEFAULT_INPUT } from '../src/lib/pipeline';
 import { flipY } from '../src/lib/bitmap';
 
@@ -7,7 +7,7 @@ const NOZZLE = 0.4;
 
 console.log('ver  modules  module   tile     isolated  diagonal-only  thin necks  tris');
 for (const [version, moduleMm] of [[12, 1.6], [10, 1.6], [8, 2.0], [6, 2.4], [4, 3.0], [0, 3.0]] as const) {
-  const d = buildDesign({ ...DEFAULT_INPUT, payload, version, moduleMm, model: getModel('rocket')!.sdf });
+  const d = buildDesign({ ...DEFAULT_INPUT, payload, version, moduleMm, model: sculpt('a rocket')!.sdf });
   const code = flipY(d.code);
   const w = code.w;
   const dark = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= code.h ? 0 : code.data[y * w + x]);

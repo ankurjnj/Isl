@@ -4,7 +4,7 @@ import Projection from './components/Projection';
 import ModelThumb from './components/ModelThumb';
 import { Bitmap } from './lib/bitmap';
 import { project } from './lib/voxel';
-import { MODELS, getModel, matchModel } from './lib/models3d';
+import { EXAMPLES, composeRecipe, parsePrompt, type Recipe } from './lib/compose';
 import { DEFAULT_INPUT, exportObj, exportStl, printingNotes, type DesignInput } from './lib/pipeline';
 import { useDesign, type WorkerDesign } from './useDesign';
 import type { ModelSource } from './lib/source';
@@ -28,14 +28,15 @@ function useSettled<T>(value: T, delay = 220): T {
 }
 
 type ArtSource =
-  | { kind: 'library'; id: string }
+  | { kind: 'composed'; recipe: Recipe }
   | { kind: 'text'; text: string }
   | { kind: 'upload'; name: string; bitmap: Bitmap };
 
 export default function App() {
   const [payload, setPayload] = useState('https://github.com/ankurjnj/Isl');
-  const [prompt, setPrompt] = useState('a cat sitting');
-  const [art, setArt] = useState<ArtSource>({ kind: 'library', id: 'cat' });
+  const [prompt, setPrompt] = useState('a cat in a wizard hat');
+  const [art, setArt] = useState<ArtSource>(
+    () => ({ kind: 'composed', recipe: parsePrompt('a cat in a wizard hat')! }));
   const [pinned, setPinned] = useState(false);
   const [version, setVersion] = useState(DEFAULT_INPUT.version);
   const [span, setSpan] = useState(DEFAULT_INPUT.span);
@@ -53,19 +54,29 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Resolve the prompt to a shape, unless the user has pinned one explicitly.
-  const suggestion = useMemo(() => matchModel(prompt), [prompt]);
+  // The example row, built once. Each is a real assembly of the prompt beside
+  // it, so the thumbnails cannot drift out of step with what the words produce.
+  const examples = useMemo(
+    () => EXAMPLES.flatMap((prompt) => {
+      const r = parsePrompt(prompt);
+      return r ? [{ prompt, sdf: composeRecipe(r) }] : [];
+    }),
+    [],
+  );
+
+  // Read the prompt into an assembly, unless an upload has been pinned.
+  const recipe = useMemo(() => parsePrompt(prompt), [prompt]);
   useEffect(() => {
     if (pinned) return;
-    if (suggestion) setArt({ kind: 'library', id: suggestion.model.id });
+    if (recipe) setArt({ kind: 'composed', recipe });
     else if (prompt.trim()) setArt({ kind: 'text', text: prompt.trim().split(/\s+/)[0].toUpperCase() });
-  }, [suggestion, prompt, pinned]);
+  }, [recipe, prompt, pinned]);
 
   // What to sculpt, as a serialisable description rather than a closure, so the
   // whole build can be handed to a worker.
   const source = useMemo<ModelSource | null>(() => {
     try {
-      if (art.kind === 'library') return { kind: 'library', id: art.id };
+      if (art.kind === 'composed') return { kind: 'composed', recipe: art.recipe };
       if (art.kind === 'text') return { kind: 'text', bitmap: textToBitmap(art.text) };
       return { kind: 'lathe', bitmap: art.bitmap };
     } catch {
@@ -147,26 +158,26 @@ export default function App() {
             className="input"
             value={prompt}
             onChange={(e) => { setPrompt(e.target.value); setPinned(false); }}
-            placeholder="a rocket taking off"
+            placeholder="a dragon with a crown riding a rocket"
           />
           <div className="hint">
-            {art.kind === 'library' && (
-              <>Using <strong>{getModel(art.id)?.name}</strong>{!pinned && suggestion ? ' — matched from your prompt' : ''}</>
+            {art.kind === 'composed' && (
+              <>Built <strong>{art.recipe.label}</strong> — assembled from your words, not picked from a list</>
             )}
-            {art.kind === 'text' && <>No model matched, so the word <strong>{art.text}</strong> is cast as raised lettering. Pick one below or upload an outline.</>}
+            {art.kind === 'text' && <>Nothing recognised, so the word <strong>{art.text}</strong> is cast as raised lettering. Try one below, or upload an outline.</>}
             {art.kind === 'upload' && <>Turning <strong>{art.name}</strong> on a lathe</>}
           </div>
 
           <div className="shapes">
-            {MODELS.map((m) => (
+            {examples.map((e) => (
               <button
-                key={m.id}
+                key={e.prompt}
                 type="button"
-                title={m.name}
-                className={'shape' + (art.kind === 'library' && art.id === m.id ? ' on' : '')}
-                onClick={() => { setArt({ kind: 'library', id: m.id }); setPinned(true); }}
+                title={e.prompt}
+                className={'shape' + (prompt.trim().toLowerCase() === e.prompt ? ' on' : '')}
+                onClick={() => { setPrompt(e.prompt); setPinned(false); }}
               >
-                <ModelThumb sdf={m.sdf} />
+                <ModelThumb sdf={e.sdf} />
               </button>
             ))}
           </div>

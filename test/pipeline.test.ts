@@ -1,5 +1,5 @@
 import { makeQr } from '../src/lib/qr';
-import { MODELS, getModel, matchModel } from '../src/lib/models3d';
+import { EXAMPLES, composeRecipe, parsePrompt, sculpt } from '../src/lib/compose';
 import { carveSculpture } from '../src/lib/carve';
 import { buildDesign, DEFAULT_INPUT, exportStl } from '../src/lib/pipeline';
 import { concatMeshes, meshSculpture } from '../src/lib/mesh';
@@ -15,7 +15,7 @@ function check(name: string, cond: boolean, detail = '') {
 
 const payload = 'https://example.com/qr3d';
 const design = (over: Partial<Parameters<typeof buildDesign>[0]> = {}) =>
-  buildDesign({ ...DEFAULT_INPUT, payload, model: MODELS[0].sdf, ...over });
+  buildDesign({ ...DEFAULT_INPUT, payload, model: sculpt('a cat')!.sdf, ...over });
 
 /**
  * What the print shows from overhead, as modules in image space.
@@ -59,8 +59,8 @@ console.log('\n== the sculpture camouflages: the top view is still the code ==')
   // The whole point of carving rather than standing the sculpture on top. What
   // the print shows from above must be the code itself, not the code with an
   // object blocking part of it -- so almost every module has to be untouched.
-  for (const id of ['rocket', 'cat', 'tree', 'castle']) {
-    const d = design({ model: getModel(id)!.sdf });
+  for (const id of ['a rocket', 'a cat', 'a tree', 'a castle']) {
+    const d = design({ model: sculpt(id)!.sdf });
     const top = topModules(d);
     let diff = 0;
     for (let i = 0; i < top.data.length; i++) if (top.data[i] !== d.qr.bitmap.data[i]) diff++;
@@ -78,7 +78,7 @@ console.log('\n== nothing stands over a light module ==');
 {
   // The camouflage rests on this: any material above a light module would be
   // visible from directly overhead and would corrupt the pattern.
-  const d = design({ model: getModel('rocket')!.sdf });
+  const d = design({ model: sculpt('a rocket')!.sdf });
   const phys = flipY(d.code);
   const g = d.grid, sub = d.report.xySub;
   let violations = 0;
@@ -94,10 +94,31 @@ console.log('\n== nothing stands over a light module ==');
   check('every voxel sits over a dark module', violations === 0, `${violations} violations`);
 }
 
+console.log('\n== every prompt assembles into one printable body ==');
+{
+  // Cheap: voxelise the assembly on its own rather than carving a code out of
+  // it, so all of the examples can be swept rather than a handful.
+  //
+  // One connected body is the assertion that matters. An attachment written
+  // against a plan's anchors can land just clear of the body it is meant to
+  // hang off, and the print then comes out as a sculpture and a loose ear.
+  for (const prompt of EXAMPLES) {
+    const r = parsePrompt(prompt);
+    const g = r ? buildFigure(composeRecipe(r), 48, 1, 1.2) : null;
+    let solid = 0; if (g) for (const v of g.data) solid += v;
+    check(prompt, !!g && countComponents(g) === 1 && solid > 1500,
+      g ? `${countComponents(g)} piece(s), ${solid} voxels` : 'nothing parsed');
+  }
+}
+
 console.log('\n== the skirt covers the code and holds it together ==');
-for (const m of MODELS) {
-  const d = design({ model: m.sdf });
-  check(m.id,
+// One from each family, carved for real. The sweep above covers the rest.
+for (const prompt of [
+  'a cat in a wizard hat', 'a dragon with a crown riding a rocket', 'an owl with a top hat',
+  'a robot with a jetpack', 'a whale on a wave', 'a tall pine tree', 'a castle', 'a rocket',
+]) {
+  const d = design({ model: sculpt(prompt)!.sdf });
+  check(prompt,
     d.report.looseParts === 1 && d.verify.matches
     && d.report.fillFraction < 0.08 && d.report.coverageFraction > 0.999,
     `${(d.report.coverageFraction * 100).toFixed(1)}% sculpted, ${d.report.supports} supports, ` +
@@ -108,7 +129,7 @@ console.log('\n== supports are minimal, not blanket grounding ==');
 {
   // A floating part needs one column reaching the tile, not all of them.
   // Filling every column is what turned a tree into a solid mass.
-  const d = design({ model: getModel('tree')!.sdf });
+  const d = design({ model: sculpt('a tree')!.sdf });
   check('a tree keeps its shape', d.report.fillFraction < 0.05,
     `+${(d.report.fillFraction * 100).toFixed(0)}% material from ${d.report.supports} supports`);
   check('and is still one piece', d.report.looseParts === 1);
@@ -215,8 +236,8 @@ console.log('\n== the code itself is never altered ==');
   // The skirt only ever adds material above modules that are already dark, so
   // there is nothing for the error correction to undo -- the pattern a scanner
   // reads is the code exactly as the generator produced it.
-  for (const id of ['castle', 'whale', 'rocket']) {
-    const d = design({ model: getModel(id)!.sdf });
+  for (const id of ['a castle', 'a whale', 'a rocket']) {
+    const d = design({ model: sculpt(id)!.sdf });
     let diff = 0;
     for (let i = 0; i < d.code.data.length; i++) {
       if (d.code.data[i] !== d.qr.bitmap.data[i]) diff++;
@@ -294,9 +315,9 @@ console.log('\n== self-supporting really means no support material ==');
   // steeper than 45 degrees. "Nothing directly below" would be the wrong test:
   // in a voxel model every sloped surface offsets by a cell per layer, so a
   // perfectly printable slope would count as overhang at every step.
-  for (const id of ['cat', 'tree', 'rocket', 'mushroom']) {
-    const on = design({ model: getModel(id)!.sdf, selfSupport: true });
-    const off = design({ model: getModel(id)!.sdf, selfSupport: false });
+  for (const id of ['a cat', 'a tree', 'a rocket', 'a mushroom']) {
+    const on = design({ model: sculpt(id)!.sdf, selfSupport: true });
+    const off = design({ model: sculpt(id)!.sdf, selfSupport: false });
     check(`${id}: nothing overhangs when self-supporting`, on.report.overhangs === 0,
       `${off.report.overhangs} overhangs without it, ${(on.report.shavedFraction * 100).toFixed(0)}% shaved`);
     check(`${id}: and it is still one piece that scans`,
@@ -320,7 +341,7 @@ console.log('\n== a build always terminates, whatever the settings ==');
   // and allocated hundreds of megabytes -- the UI simply waited forever.
   const t0 = Date.now();
   const heavy = buildDesign({
-    ...DEFAULT_INPUT, payload, model: getModel('castle')!.sdf,
+    ...DEFAULT_INPUT, payload, model: sculpt('a castle')!.sdf,
     version: 20, span: 1, xySub: 4, zSub: 4,
   });
   const ms = Date.now() - t0;
@@ -368,8 +389,8 @@ console.log('\n== the sculpture takes the whole code, and leaves no needles ==')
     }
     return n;
   };
-  for (const id of ['cat', 'rocket', 'tree']) {
-    const m = design({ model: getModel(id)!.sdf });
+  for (const id of ['a cat', 'a rocket', 'a tree']) {
+    const m = design({ model: sculpt(id)!.sdf });
     check(`${id}: few columns stand clear of everything around them`,
       towers(m.grid, m.report.xySub, DEFAULT_INPUT.tileLayers) <= 4,
       `${towers(m.grid, m.report.xySub, DEFAULT_INPUT.tileLayers)} towers, ${m.report.trimmedColumns} trimmed`);
@@ -391,9 +412,9 @@ console.log('\n== the mesh is a closed, correctly-wound solid ==');
     }
     return v;
   };
-  for (const id of ['rocket', 'cat', 'castle']) {
+  for (const id of ['a rocket', 'a cat', 'a castle']) {
     const qr = makeQr(payload, 'H', 4, 8);
-    const carved = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, getModel(id)!.sdf,
+    const carved = carveSculpture(qr.bitmap, qr.quietZone, qr.moduleCount, sculpt(id)!.sdf,
       { span: 0.55, zSub: 2, xySub: 2, tileLayers: 2, selfSupport: true });
     const mm = 1.5, lm = 0.9;
     const mesh = meshSculpture(carved.grid, { moduleMm: mm, layerMm: lm, baseMm: 0, withBase: false });
@@ -416,19 +437,49 @@ console.log('\n== STL export ==');
 
 console.log('\n== prompt matching ==');
 {
-  const cases: [string, string][] = [
-    ['a tree in a park', 'tree'],
-    ['a christmas fir', 'pine'],
-    ['make it a rocket ship blasting off', 'rocket'],
-    ['a cat sitting', 'cat'],
-    ['medieval castle', 'castle'],
-    ['a teapot for tea', 'teapot'],
+  // Plan, attachments and mount are three independent readings of one
+  // sentence, so the cases check each of them and then all three at once.
+  const cases: Array<[string, Partial<{ plan: string; attach: string[]; mount: string }>]> = [
+    ['a tree in a park', { plan: 'treeBroadleaf' }],
+    ['a christmas fir', { plan: 'treeConifer' }],
+    ['make it a rocket ship blasting off', { plan: 'rocket' }],
+    ['a cat sitting', { plan: 'quadruped' }],
+    ['medieval castle', { plan: 'castle' }],
+    ['a cat in a wizard hat', { plan: 'quadruped', attach: ['wizardHat'] }],
+    ['an owl with a top hat', { plan: 'bird', attach: ['topHat'] }],
+    ['a dog on a skateboard', { plan: 'quadrupedStanding', mount: 'skateboard' }],
+    ['a dragon with a crown riding a rocket',
+      { plan: 'quadrupedStanding', attach: ['crown'], mount: 'rocket' }],
   ];
   for (const [prompt, want] of cases) {
-    const m = matchModel(prompt);
-    check(`"${prompt}"`, m?.model.id === want, `-> ${m?.model.id ?? 'none'}`);
+    const r = parsePrompt(prompt);
+    const okPlan = !want.plan || r?.plan === want.plan;
+    const okAttach = !want.attach || want.attach.every((a) => r?.attach.includes(a));
+    const okMount = !want.mount || r?.mount === want.mount;
+    check(`"${prompt}"`, !!r && okPlan && okAttach && okMount,
+      r ? `-> ${r.plan} + [${r.attach.join(' ')}]${r.mount ? ` on ${r.mount}` : ''}` : '-> none');
   }
-  check('no false match on gibberish', matchModel('zzz qqq') === null);
+  check('no false match on gibberish', parsePrompt('zzz qqq') === null);
+
+  // The subject is the earliest noun, so scenery after it never takes over.
+  const cat = parsePrompt('a cat riding a rocket');
+  check('the subject wins over the thing it rides',
+    cat?.plan === 'quadruped' && cat.mount === 'rocket', `-> ${cat?.plan} on ${cat?.mount}`);
+  // And a rocket by itself is a rocket, not something standing on one.
+  const rocket = parsePrompt('a rocket');
+  check('a rocket alone is the subject', rocket?.plan === 'rocket' && !rocket.mount);
+
+  // A longer accessory phrase consumes its words, so the shorter one inside it
+  // cannot match too and hang a second tail off the same animal.
+  const fox = parsePrompt('a fox with a bushy tail');
+  check('overlapping accessory phrases match once',
+    fox?.attach.filter((a) => a.toLowerCase().includes('tail')).length === 1,
+    `-> [${fox?.attach.join(' ')}]`);
+
+  // Adjectives compound instead of overwriting each other.
+  const big = parsePrompt('a tall chubby bear');
+  check('modifiers compound', !!big && big.shape.height > 1 && big.shape.girth > 1.3,
+    `height ${big?.shape.height.toFixed(2)}, girth ${big?.shape.girth.toFixed(2)}`);
 }
 
 console.log(failures ? `\n${failures} FAILURES\n` : '\nAll checks passed\n');
